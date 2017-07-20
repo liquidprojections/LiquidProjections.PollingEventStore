@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2010/07/nuspec.xsd">
+  <metadata>
+    <id>LiquidProjections.PollingEventStore.Sources</id>
+    <title>LiquidProjections</title>
+    <version>0.0.1</version>
+    <owners>Dennis Doomen</owners>
+    <authors>Dennis Doomen</authors>
+    <summary>
+       A highly concurrent and efficient LiquidProjections adapter to connect passive event stores to LiquidProjections.
+    </summary>
+    <description>
+       An adapter for event stores that cannot actively push events to LiquidProjections. 
+	   It efficiently support multiple concurrent subscribers each interested in a different checkpoint without hitting the underlying event store concurrently. 
+    </description>
+    <language>en-US</language>
+    <licenseUrl>https://github.com/liquidprojections/LiquidProjections.PollingEventStore</licenseUrl>
+    <projectUrl>https://github.com/liquidprojections/LiquidProjections.PollingEventStore</projectUrl>
+    <tags>Event Sourcing;</tags>
+    <copyright>Copyright Dennis Doomen 2015-2017</copyright>
+    <releaseNotes>
+      See https://github.com/liquidprojections/LiquidProjections.PollingEventStore/releases
+    </releaseNotes>
+  </metadata>
+  <files>
+    <file src="LiquidProjections.PollingEventStore\PollingEventStore.cs" target="content/App_Packages/LiquidProjections.PollingEventStore" />
+  </files>
+</package>

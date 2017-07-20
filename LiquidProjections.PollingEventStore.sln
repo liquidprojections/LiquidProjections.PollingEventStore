@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 15
+VisualStudioVersion = 15.0.26430.15
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LiquidProjections.PollingEventStore", "Src\LiquidProjections.PollingEventStore\LiquidProjections.PollingEventStore.csproj", "{6BCA3127-2F9D-44A2-B162-CE8B49FEC870}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LiquidProjections.PollingEventStore.Specs", "Tests\LiquidProjections.PollingEventStore.Specs\LiquidProjections.PollingEventStore.Specs.csproj", "{6C120D8F-4491-4E56-9E6C-58A0D07C3B36}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{6BCA3127-2F9D-44A2-B162-CE8B49FEC870}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6BCA3127-2F9D-44A2-B162-CE8B49FEC870}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6BCA3127-2F9D-44A2-B162-CE8B49FEC870}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6BCA3127-2F9D-44A2-B162-CE8B49FEC870}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6C120D8F-4491-4E56-9E6C-58A0D07C3B36}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6C120D8F-4491-4E56-9E6C-58A0D07C3B36}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6C120D8F-4491-4E56-9E6C-58A0D07C3B36}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6C120D8F-4491-4E56-9E6C-58A0D07C3B36}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
