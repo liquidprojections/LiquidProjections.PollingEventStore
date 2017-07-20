@@ -3,9 +3,14 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
 VisualStudioVersion = 15.0.26430.15
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LiquidProjections.PollingEventStore", "Src\LiquidProjections.PollingEventStore\LiquidProjections.PollingEventStore.csproj", "{6BCA3127-2F9D-44A2-B162-CE8B49FEC870}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "LiquidProjections.PollingEventStore", "Src\LiquidProjections.PollingEventStore\LiquidProjections.PollingEventStore.csproj", "{6BCA3127-2F9D-44A2-B162-CE8B49FEC870}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LiquidProjections.PollingEventStore.Specs", "Tests\LiquidProjections.PollingEventStore.Specs\LiquidProjections.PollingEventStore.Specs.csproj", "{6C120D8F-4491-4E56-9E6C-58A0D07C3B36}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{C05F9764-3336-4A87-BA9F-7F9360E47629}"
+	ProjectSection(SolutionItems) = preProject
+		Src\.nuspec = Src\.nuspec
+	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LiquidProjections.PollingEventStore.Specs", "Tests\LiquidProjections.PollingEventStore.Specs\LiquidProjections.PollingEventStore.Specs.csproj", "{10FD8033-4296-4E33-A295-C046B0A1565B}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -17,10 +22,10 @@ Global
 		{6BCA3127-2F9D-44A2-B162-CE8B49FEC870}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6BCA3127-2F9D-44A2-B162-CE8B49FEC870}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6BCA3127-2F9D-44A2-B162-CE8B49FEC870}.Release|Any CPU.Build.0 = Release|Any CPU
-		{6C120D8F-4491-4E56-9E6C-58A0D07C3B36}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{6C120D8F-4491-4E56-9E6C-58A0D07C3B36}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{6C120D8F-4491-4E56-9E6C-58A0D07C3B36}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{6C120D8F-4491-4E56-9E6C-58A0D07C3B36}.Release|Any CPU.Build.0 = Release|Any CPU
+		{10FD8033-4296-4E33-A295-C046B0A1565B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{10FD8033-4296-4E33-A295-C046B0A1565B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{10FD8033-4296-4E33-A295-C046B0A1565B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{10FD8033-4296-4E33-A295-C046B0A1565B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
