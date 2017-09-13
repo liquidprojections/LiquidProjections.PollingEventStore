@@ -162,43 +162,40 @@ namespace LiquidProjections.PollingEventStore
 
         public void Dispose()
         {
-            bool isDisposing;
-
             lock (syncRoot)
             {
-                isDisposing = !isDisposed;
-
-                if (isDisposing)
+                if (!isDisposed)
                 {
                     isDisposed = true;
-                }
-            }
 
-            if (isDisposing)
-            {
-                if (cancellationTokenSource != null)
-                {
-#if DEBUG
-                    LogProvider.GetLogger(typeof(Subscription)).Debug(() => $"Subscription {Id} is being stopped.");
-#endif
-
-                    if (!cancellationTokenSource.IsCancellationRequested)
+                    // Wait for the task asynchronously.
+                    Task.Run(() =>
                     {
-                        cancellationTokenSource.Cancel();
-                    }
+                        if (cancellationTokenSource != null)
+                        {
+#if DEBUG
+                            LogProvider.GetLogger(typeof(Subscription)).Debug(() => $"Subscription {Id} is being stopped.");
+#endif
 
-                    Task?.Wait();
-                    cancellationTokenSource.Dispose();
-                }
+                            if (!cancellationTokenSource.IsCancellationRequested)
+                            {
+                                cancellationTokenSource.Cancel();
+                            }
 
-                lock (eventStoreAdapter.subscriptionLock)
-                {
-                    eventStoreAdapter.subscriptions.Remove(this);
-                }
+                            Task?.Wait();
+                            cancellationTokenSource.Dispose();
+                        }
+
+                        lock (eventStoreAdapter.subscriptionLock)
+                        {
+                            eventStoreAdapter.subscriptions.Remove(this);
+                        }
 
 #if DEBUG
-                LogProvider.GetLogger(typeof(Subscription)).Debug(() => $"Subscription {Id} has been stopped.");
+                        LogProvider.GetLogger(typeof(Subscription)).Debug(() => $"Subscription {Id} has been stopped.");
 #endif
+                    });
+                }
             }
         }
     }
