@@ -182,7 +182,15 @@ namespace LiquidProjections.PollingEventStore
                                 cancellationTokenSource.Cancel();
                             }
 
-                            Task?.Wait();
+                            try
+                            {
+                                Task?.Wait();
+                            }
+                            catch (AggregateException)
+                            {
+                                // Ignore.
+                            }
+
                             cancellationTokenSource.Dispose();
                         }
 
