@@ -13,7 +13,7 @@ using Xunit;
 
 namespace LiquidProjections.PollingEventStore.Specs
 {
-    namespace EventStoreClientSpecs
+    namespace PollingEventStoreAdapterSpecs
     {
         public class When_the_persistency_engine_is_temporarily_unavailable : GivenSubject<CreateSubscription>
         {
