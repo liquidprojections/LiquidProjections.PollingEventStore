@@ -42,8 +42,8 @@
     <Reference Include="FluentAssertions.Core, Version=4.19.3.0, Culture=neutral, PublicKeyToken=33f2691a05b67b6a, processorArchitecture=MSIL">
       <HintPath>..\..\packages\FluentAssertions.4.19.3\lib\net45\FluentAssertions.Core.dll</HintPath>
     </Reference>
-    <Reference Include="LiquidProjections.Abstractions, Version=2.2.0.0, Culture=neutral, processorArchitecture=MSIL">
-      <HintPath>..\..\packages\LiquidProjections.Abstractions.2.2.0\lib\netstandard1.1\LiquidProjections.Abstractions.dll</HintPath>
+    <Reference Include="LiquidProjections.Abstractions, Version=2.3.0.0, Culture=neutral, PublicKeyToken=null">
+      <HintPath>..\..\packages\LiquidProjections.Abstractions.2.3.0\lib\netstandard1.1\LiquidProjections.Abstractions.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
