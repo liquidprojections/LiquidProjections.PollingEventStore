@@ -13,7 +13,7 @@ using Xunit;
 
 namespace LiquidProjections.PollingEventStore.Specs
 {
-    namespace EventStoreClientSpecs
+    namespace PollingEventStoreAdapterSpecs
     {
         public class When_the_persistency_engine_is_temporarily_unavailable : GivenSubject<CreateSubscription>
         {
@@ -415,6 +415,49 @@ namespace LiquidProjections.PollingEventStore.Specs
                 if (!secondSubscriptionReceivedTheTransaction.Wait(TimeSpan.FromSeconds(10)))
                 {
                     throw new InvalidOperationException("The second subscription has not got the transaction in 10 seconds.");
+                }
+            }
+        }
+        
+        public class When_the_subscriber_cancels_the_subscription_from_inside_its_transaction_handler :
+            GivenSubject<PollingEventStoreAdapter>
+        {
+            private readonly TimeSpan pollingInterval = 500.Milliseconds();
+            private readonly DateTime utcNow = DateTime.UtcNow;
+            private readonly ManualResetEventSlim disposed = new ManualResetEventSlim();
+
+            public When_the_subscriber_cancels_the_subscription_from_inside_its_transaction_handler()
+            {
+                Given(() =>
+                {
+                    UseThe(new TransactionBuilder().WithCheckpoint(123).Build());
+
+                    UseThe(A.Fake<IPassiveEventStore>());
+                    A.CallTo(() => The<IPassiveEventStore>().GetFrom(A<long?>.Ignored)).Returns(new[] { The<Transaction>() });
+
+                    WithSubject(_ => new PollingEventStoreAdapter(The<IPassiveEventStore>(), 11, pollingInterval, 100,
+                        () => utcNow));
+                });
+
+                When(() => Subject.Subscribe(null,
+                    new Subscriber
+                    {
+                        HandleTransactions = (transactions, info) =>
+                        {
+                            info.Subscription.Dispose();
+                            disposed.Set();
+                            return Task.FromResult(0);
+                        }
+                    },
+                    "someId"));
+            }
+
+            [Fact]
+            public void Then_it_should_cancel_the_subscription_asynchronously()
+            {
+                if (!disposed.Wait(TimeSpan.FromSeconds(10)))
+                {
+                    throw new InvalidOperationException("The subscription was not disposed in 10 seconds.");
                 }
             }
         }
