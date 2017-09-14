@@ -48,10 +48,11 @@ namespace LiquidProjections.PollingEventStore
                 LogProvider.GetLogger(typeof(Subscription)).Debug(() => $"Subscription {Id} has been started.");
 #endif
 
-                SubscriptionInfo info = new SubscriptionInfo
+                var info = new SubscriptionInfo
                 {
                     Id = Id,
-                    Subscription = this
+                    Subscription = this,
+                    CancellationToken = cancellationTokenSource.Token
                 };
 
                 Task = Task.Factory.StartNew(async () =>

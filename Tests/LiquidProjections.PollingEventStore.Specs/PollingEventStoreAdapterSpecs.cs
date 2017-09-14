@@ -461,5 +461,63 @@ namespace LiquidProjections.PollingEventStore.Specs
                 }
             }
         }
+        
+        public class When_the_transaction_handler_has_delay_which_uses_the_cancellation_token_and_the_subscription_is_cancelled :
+            GivenSubject<PollingEventStoreAdapter>
+        {
+            private readonly TimeSpan pollingInterval = 500.Milliseconds();
+            private readonly DateTime utcNow = DateTime.UtcNow;
+            private readonly ManualResetEventSlim transactionHandlerStarted = new ManualResetEventSlim();
+            private readonly ManualResetEventSlim transactionHandlerCancelled = new ManualResetEventSlim();
+            private IDisposable subscription;
+
+            public When_the_transaction_handler_has_delay_which_uses_the_cancellation_token_and_the_subscription_is_cancelled()
+            {
+                Given(() =>
+                {
+                    UseThe(new TransactionBuilder().WithCheckpoint(123).Build());
+
+                    UseThe(A.Fake<IPassiveEventStore>());
+                    A.CallTo(() => The<IPassiveEventStore>().GetFrom(A<long?>.Ignored)).Returns(new[] { The<Transaction>() });
+
+                    WithSubject(_ => new PollingEventStoreAdapter(The<IPassiveEventStore>(), 11, pollingInterval, 100,
+                        () => utcNow));
+
+                    subscription = Subject.Subscribe(null,
+                        new Subscriber
+                        {
+                            HandleTransactions = async (transactions, info) =>
+                            {
+                                transactionHandlerStarted.Set();
+                                
+                                try
+                                {
+                                    await Task.Delay(TimeSpan.FromDays(1), info.CancellationToken.Value);
+                                }
+                                catch (OperationCanceledException)
+                                {
+                                    transactionHandlerCancelled.Set();
+                                }
+                            }
+                        },
+                        "someId");
+                });
+
+                When(() =>
+                {
+                    transactionHandlerStarted.Wait();
+                    subscription.Dispose();
+                });
+            }
+
+            [Fact]
+            public void Then_it_should_cancel_the_transaction_handler()
+            {
+                if (!transactionHandlerCancelled.Wait(TimeSpan.FromSeconds(10)))
+                {
+                    throw new InvalidOperationException("The transaction handler was not cancelled in 10 seconds.");
+                }
+            }
+        }
     }
 }
