@@ -2,7 +2,7 @@
 
 namespace LiquidProjections.PollingEventStore
 {
-    internal sealed class CheckpointRequestTimestamp
+    internal struct CheckpointRequestTimestamp
     {
         public CheckpointRequestTimestamp(long previousCheckpoint, DateTime dateTimeUtc)
         {

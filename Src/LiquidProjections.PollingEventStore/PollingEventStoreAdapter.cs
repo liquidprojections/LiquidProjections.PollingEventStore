@@ -32,7 +32,7 @@ namespace LiquidProjections.PollingEventStore
         /// </summary>
         private readonly LruCache<long, Transaction> transactionCacheByPreviousCheckpoint;
 
-        private CheckpointRequestTimestamp lastSuccessfulPollingRequestWithoutResults;
+        private CheckpointRequestTimestamp? lastSuccessfulPollingRequestWithoutResults;
 
         /// <summary>
         /// Creates an adapter that observes an implementation of <see cref="IPassiveEventStore"/> and efficiently handles
@@ -182,13 +182,12 @@ namespace LiquidProjections.PollingEventStore
                     throw new OperationCanceledException();
                 }
 
-                CheckpointRequestTimestamp effectiveLastExistingCheckpointRequest =
-                    Volatile.Read(ref lastSuccessfulPollingRequestWithoutResults);
+                CheckpointRequestTimestamp? effectiveLastExistingCheckpointRequest = lastSuccessfulPollingRequestWithoutResults;
 
-                if ((effectiveLastExistingCheckpointRequest != null) &&
-                    (effectiveLastExistingCheckpointRequest.PreviousCheckpoint == previousCheckpoint))
+                if ((effectiveLastExistingCheckpointRequest.HasValue != null) &&
+                    (effectiveLastExistingCheckpointRequest.Value.PreviousCheckpoint == previousCheckpoint))
                 {
-                    TimeSpan timeAfterPreviousRequest = getUtcNow() - effectiveLastExistingCheckpointRequest.DateTimeUtc;
+                    TimeSpan timeAfterPreviousRequest = getUtcNow() - effectiveLastExistingCheckpointRequest.Value.DateTimeUtc;
                     if (timeAfterPreviousRequest < pollInterval)
                     {
                         TimeSpan delay = pollInterval - timeAfterPreviousRequest;
@@ -394,9 +393,7 @@ namespace LiquidProjections.PollingEventStore
                     $"that there are no new transactions yet. Next request for the new transactions will be delayed.");
 #endif
 
-                Volatile.Write(
-                    ref lastSuccessfulPollingRequestWithoutResults,
-                    new CheckpointRequestTimestamp(previousCheckpoint, timeOfRequestUtc));
+                lastSuccessfulPollingRequestWithoutResults = new CheckpointRequestTimestamp(previousCheckpoint, timeOfRequestUtc);
             }
 
             return new Page(previousCheckpoint, transactions);
