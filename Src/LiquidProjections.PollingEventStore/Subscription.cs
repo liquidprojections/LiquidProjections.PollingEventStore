@@ -59,7 +59,7 @@ namespace LiquidProjections.PollingEventStore
                         {
                             try
                             {
-                                await RunAsync(info);
+                                await RunAsync(info).ConfigureAwait(false);
                             }
                             catch (OperationCanceledException)
                             {
@@ -85,7 +85,7 @@ namespace LiquidProjections.PollingEventStore
 
             while (!cancellationTokenSource.IsCancellationRequested)
             {
-                Page page = await TryGetNextPage(lastProcessedCheckpoint);
+                Page page = await TryGetNextPage(lastProcessedCheckpoint).ConfigureAwait(false);
                 if (page != null)
                 {
                     var transactions = page.Transactions;
@@ -94,7 +94,7 @@ namespace LiquidProjections.PollingEventStore
                     {
                         if (!transactions.Any())
                         {
-                            await subscriber.NoSuchCheckpoint(info);
+                            await subscriber.NoSuchCheckpoint(info).ConfigureAwait(false);
                         }
                         else
                         {
