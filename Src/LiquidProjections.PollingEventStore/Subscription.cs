@@ -55,7 +55,7 @@ namespace LiquidProjections.PollingEventStore
                     CancellationToken = cancellationTokenSource.Token
                 };
 
-                Task = Task.Factory.StartNew(async () =>
+                Task = Task.Run(async () =>
                         {
                             try
                             {
@@ -72,10 +72,7 @@ namespace LiquidProjections.PollingEventStore
                                     exception);
                             }
                         },
-                        CancellationToken.None,
-                        TaskCreationOptions.DenyChildAttach | TaskCreationOptions.LongRunning,
-                        TaskScheduler.Default)
-                    .Unwrap();
+                        CancellationToken.None);
             }
         }
 
