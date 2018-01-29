@@ -440,6 +440,18 @@ namespace LiquidProjections.PollingEventStore
     /// </summary>
     public interface IPassiveEventStore
     {
+        /// <summary>
+        /// Loads <see cref="Transaction"/>s from the storage in the order that they should be projected (should be the same order that they were persisted).
+        /// </summary>
+        /// <remarks>
+        /// The implementation is allowed to return just a limited subset of items at a time.
+        /// It is up to the implementation to decide how many items should be returned at a time.
+        /// The only requirement is that the implementation should return at least one <see cref="Transaction"/>,
+        /// if there are any transactions having checkpoint (<see cref="Transaction.Checkpoint"/>) bigger than given one.
+        /// </remarks>
+        /// <param name="checkpoint">
+        ///  Determines the value of the  <see cref="Transaction.Checkpoint"/>, next to which <see cref="Transaction"/>s should be loaded from the storage.
+        /// </param>
         IEnumerable<Transaction> GetFrom(long? checkpoint);
     }
 }
