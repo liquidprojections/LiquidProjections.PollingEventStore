@@ -449,9 +449,9 @@ namespace LiquidProjections.PollingEventStore
         /// The only requirement is that the implementation should return at least one <see cref="Transaction"/>,
         /// if there are any transactions having checkpoint (<see cref="Transaction.Checkpoint"/>) bigger than given one.
         /// </remarks>
-        /// <param name="checkpoint">
+        /// <param name="previousCheckpoint">
         ///  Determines the value of the  <see cref="Transaction.Checkpoint"/>, next to which <see cref="Transaction"/>s should be loaded from the storage.
         /// </param>
-        IEnumerable<Transaction> GetFrom(long? checkpoint);
+        IEnumerable<Transaction> GetFrom(long? previousCheckpoint);
     }
 }
