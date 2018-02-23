@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using LiquidProjections.Abstractions;
-using LiquidProjections.NEventStore.Logging;
+using LiquidProjections.PollingEventStoreAdapter.Logging;
 
 namespace LiquidProjections.PollingEventStore
 {
@@ -16,7 +16,12 @@ namespace LiquidProjections.PollingEventStore
     /// If the implementation of <see cref="IPassiveEventStore"/> implements <see cref="IDisposable"/>, disposing 
     /// the <see cref="PollingEventStoreAdapter"/> will also dispose the event store.
     /// </remarks>
-    public class PollingEventStoreAdapter : IDisposable
+#if LIQUIDPROJECTIONS_BUILD_TIME
+    public
+#else
+    internal 
+#endif
+        class PollingEventStoreAdapter : IDisposable
     {
         private readonly TimeSpan pollInterval;
         private readonly int maxPageSize;
@@ -138,7 +143,7 @@ namespace LiquidProjections.PollingEventStore
                     }
                 }
 
-#if DEBUG
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
                 LogProvider.GetLogger(typeof(PollingEventStoreAdapter)).Debug(() =>
                     $"Subscription {subscriptionId} has found a page of size {resultPage.Count} " +
                     $"from checkpoint {resultPage.First().Checkpoint} " +
@@ -148,7 +153,7 @@ namespace LiquidProjections.PollingEventStore
                 return new Page(previousCheckpoint, resultPage);
             }
 
-#if DEBUG
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
             LogProvider.GetLogger(typeof(PollingEventStoreAdapter)).Debug(() =>
                 $"Subscription {subscriptionId} has not found the next transaction in the cache.");
 #endif
@@ -158,7 +163,7 @@ namespace LiquidProjections.PollingEventStore
 
         private void StartPreloadingNextPage(long previousCheckpoint, string subscriptionId)
         {
-#if DEBUG
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
             LogProvider.GetLogger(typeof(PollingEventStoreAdapter)).Debug(() =>
                 $"Subscription {subscriptionId} has started preloading transactions " +
                 $"after checkpoint {previousCheckpoint}.");
@@ -174,7 +179,7 @@ namespace LiquidProjections.PollingEventStore
             {
                 if (isDisposed)
                 {
-#if DEBUG
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
                     LogProvider.GetLogger(typeof(PollingEventStoreAdapter)).Debug(() =>
                         $"Page loading for subscription {subscriptionId} cancelled because the adapter is disposed.");
 #endif
@@ -193,7 +198,7 @@ namespace LiquidProjections.PollingEventStore
                     {
                         TimeSpan delay = pollInterval - timeAfterPreviousRequest;
 
-#if DEBUG
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
                         LogProvider.GetLogger(typeof(PollingEventStoreAdapter)).Debug(() =>
                             $"Subscription {subscriptionId} is waiting " +
                             $"for {delay} before checking for new transactions.");
@@ -242,7 +247,7 @@ namespace LiquidProjections.PollingEventStore
             {
                 if (isTaskOwner)
                 {
-#if DEBUG
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
                     LogProvider.GetLogger(typeof(PollingEventStoreAdapter))
                         .Debug(() => $"Subscription {subscriptionId} created a loader {loader.Id} " +
                                      $"for a page after checkpoint {previousCheckpoint}.");
@@ -250,7 +255,7 @@ namespace LiquidProjections.PollingEventStore
 
                     if (isDisposed)
                     {
-#if DEBUG
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
                         LogProvider.GetLogger(typeof(PollingEventStoreAdapter))
                             .Debug(() => $"The loader {loader.Id} is cancelled because the adapter is disposed.");
 #endif
@@ -267,7 +272,7 @@ namespace LiquidProjections.PollingEventStore
                 }
                 else
                 {
-#if DEBUG
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
                     LogProvider.GetLogger(typeof(PollingEventStoreAdapter))
                         .Debug(() => $"Subscription {subscriptionId} is waiting for loader {loader.Id}.");
 #endif
@@ -288,7 +293,7 @@ namespace LiquidProjections.PollingEventStore
                 }
                 finally
                 {
-#if DEBUG
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
                     LogProvider.GetLogger(typeof(PollingEventStoreAdapter)).Debug(() =>
                         $"Loader for subscription {subscriptionId} is no longer the current one.");
 #endif
@@ -297,7 +302,7 @@ namespace LiquidProjections.PollingEventStore
             }
             catch (Exception exception)
             {
-#if DEBUG
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
                 LogProvider.GetLogger(typeof(PollingEventStoreAdapter)).DebugException(
                     $"Loader for subscription {subscriptionId} has failed.",
                     exception);
@@ -307,7 +312,7 @@ namespace LiquidProjections.PollingEventStore
                 return;
             }
 
-#if DEBUG
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
             LogProvider.GetLogger(typeof(PollingEventStoreAdapter)).Debug(() =>
                 $"Loader for subscription {subscriptionId} has completed.");
 #endif
@@ -322,7 +327,7 @@ namespace LiquidProjections.PollingEventStore
                 Page cachedPage = TryGetNextPageFromCache(previousCheckpoint, subscriptionId);
                 if (cachedPage.Transactions.Count > 0)
                 {
-#if DEBUG
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
                     LogProvider.GetLogger(typeof(PollingEventStoreAdapter))
                         .Debug(() =>
                             $"Loader for subscription {subscriptionId} has found a page in the cache.");
@@ -362,7 +367,7 @@ namespace LiquidProjections.PollingEventStore
 
             if (transactions.Count > 0)
             {
-#if DEBUG
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
                 LogProvider.GetLogger(typeof(PollingEventStoreAdapter)).Debug(() =>
                     $"Loader for subscription {subscriptionId ?? "without ID"} has loaded {transactions.Count} transactions " +
                     $"from checkpoint {transactions.First().Checkpoint} to checkpoint {transactions.Last().Checkpoint}.");
@@ -379,7 +384,7 @@ namespace LiquidProjections.PollingEventStore
 
                     transactionCacheByPreviousCheckpoint.Set(previousCheckpoint, transactions[0]);
 
-#if DEBUG
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
                     LogProvider.GetLogger(typeof(PollingEventStoreAdapter)).Debug(() =>
                         $"Loader for subscription {subscriptionId ?? "without ID"} has cached {transactions.Count} transactions " +
                         $"from checkpoint {transactions.First().Checkpoint} to checkpoint {transactions.Last().Checkpoint}.");
@@ -388,7 +393,7 @@ namespace LiquidProjections.PollingEventStore
             }
             else
             {
-#if DEBUG
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
                 LogProvider.GetLogger(typeof(PollingEventStoreAdapter)).Debug(() =>
                     $"Loader for subscription {subscriptionId} has discovered " +
                     $"that there are no new transactions yet. Next request for the new transactions will be delayed.");

@@ -3,7 +3,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using LiquidProjections.Abstractions;
-using LiquidProjections.NEventStore.Logging;
+using LiquidProjections.PollingEventStoreAdapter.Logging;
 
 namespace LiquidProjections.PollingEventStore
 {
