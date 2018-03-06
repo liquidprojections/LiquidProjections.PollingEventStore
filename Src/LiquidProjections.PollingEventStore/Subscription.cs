@@ -3,7 +3,11 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using LiquidProjections.Abstractions;
+#if LIBLOG_PROVIDERS_ONLY
+using LiquidProjections.PollingEventStoreAdapter.LibLog;
+#else
 using LiquidProjections.PollingEventStoreAdapter.Logging;
+#endif
 
 namespace LiquidProjections.PollingEventStore
 {
@@ -57,6 +61,7 @@ namespace LiquidProjections.PollingEventStore
 
                 Task = Task.Run(async () =>
                         {
+
                             try
                             {
                                 await RunAsync(info).ConfigureAwait(false);
@@ -67,10 +72,17 @@ namespace LiquidProjections.PollingEventStore
                             }
                             catch (Exception exception)
                             {
+#if !LIBLOG_PROVIDERS_ONLY
                                 LogProvider.GetLogger(typeof(Subscription)).FatalException(
                                     "NEventStore polling task has failed. Event subscription has been cancelled.",
                                     exception);
+#else
+                                LogProvider.ResolveLogProvider().GetLogger(nameof(Subscription))?.Invoke(LogLevel.Fatal,
+                                    () => "NEventStore polling task has failed. Event subscription has been cancelled.",
+                                    exception);
+#endif
                             }
+
                         },
                         CancellationToken.None);
             }
