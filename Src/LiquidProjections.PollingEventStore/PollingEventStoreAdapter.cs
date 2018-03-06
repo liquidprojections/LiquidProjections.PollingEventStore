@@ -4,7 +4,13 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using LiquidProjections.Abstractions;
+
+
+#if !LIBLOG_PROVIDERS_ONLY
 using LiquidProjections.PollingEventStoreAdapter.Logging;
+#else
+using LiquidProjections.PollingEventStoreAdapter.LibLog;
+#endif    
 
 namespace LiquidProjections.PollingEventStore
 {
@@ -328,19 +334,31 @@ namespace LiquidProjections.PollingEventStore
                 if (cachedPage.Transactions.Count > 0)
                 {
 #if LIQUIDPROJECTIONS_DIAGNOSTICS
-                    LogProvider.GetLogger(typeof(PollingEventStoreAdapter))
-                        .Debug(() =>
-                            $"Loader for subscription {subscriptionId} has found a page in the cache.");
+    #if !LIBLOG_PROVIDERS_ONLY
+                        LogProvider.GetLogger(typeof(PollingEventStoreAdapter))
+                            .Debug(() =>
+                                $"Loader for subscription {subscriptionId} has found a page in the cache.");
+    #else
+                        LogProvider.ResolveLogProvider().GetLogger(nameof(PollingEventStoreAdapter))?.Invoke(LogLevel.Debug,
+                            () => $"Loader for subscription {subscriptionId} has found a page in the cache.");
+    #endif
 #endif
                     return cachedPage;
                 }
+
             }
             catch (Exception exception)
             {
+#if !LIBLOG_PROVIDERS_ONLY
                 LogProvider.GetLogger(typeof(PollingEventStoreAdapter))
                     .ErrorException(
                         $"Failed getting transactions after checkpoint {previousCheckpoint} from the cache.",
                         exception);
+#else
+                LogProvider.ResolveLogProvider().GetLogger(nameof(PollingEventStoreAdapter))?.Invoke(LogLevel.Error,
+                    () => $"Failed getting transactions after checkpoint {previousCheckpoint} from the cache.",
+                    exception);
+#endif
             }
 
             DateTime timeOfRequestUtc = getUtcNow();
@@ -357,10 +375,16 @@ namespace LiquidProjections.PollingEventStore
             }
             catch (Exception exception)
             {
+#if !LIBLOG_PROVIDERS_ONLY
                 LogProvider.GetLogger(typeof(PollingEventStoreAdapter))
                     .ErrorException(
                         $"Failed loading transactions after checkpoint {previousCheckpoint} from NEventStore",
                         exception);
+#else
+                LogProvider.ResolveLogProvider().GetLogger(nameof(PollingEventStoreAdapter))?.Invoke(LogLevel.Error,
+                    () => $"Failed loading transactions after checkpoint {previousCheckpoint} from NEventStore",
+                    exception);
+#endif
 
                 throw;
             }

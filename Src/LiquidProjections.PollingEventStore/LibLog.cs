@@ -640,14 +640,12 @@ namespace LiquidProjections.PollingEventStoreAdapter.Logging
             }
             catch (Exception ex)
             {
-#if LIBLOG_PORTABLE
+#if (!LIBLOG_PORTABLE && !LIBLOG_PROVIDERS_ONLY)
                 Debug.WriteLine(
-#else
-                Console.WriteLine(
-#endif
                     "Exception occurred resolving a log provider. Logging for this assembly {0} is disabled. {1}",
                     typeof(LogProvider).GetAssemblyPortable().FullName,
                     ex);
+#endif
             }
             return null;
         }
@@ -1422,7 +1420,8 @@ namespace LiquidProjections.PollingEventStoreAdapter.Logging.LogProviders
                                 break;
                             }
                         }
-#else
+#endif
+#if !LIBLOG_PROVIDERS_ONLY
                         s_callerStackBoundaryType = typeof (LoggerExecutionWrapper);
 #endif
                     }
