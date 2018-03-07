@@ -4,5 +4,4 @@
 A source-only Nuget package for event stores that cannot actively push events to [LiquidProjections](https://github.com/liquidprojections/LiquidProjections). It efficiently support multiple concurrent subscribers each interested in a different checkpoint without hitting the underlying event store concurrently.
 
 ## Important Notes
-* This library uses [Liblog](https://github.com/damianh/LibLog) to log details about asynchronous exceptions to your logging framework of choice. You can also have it log more diagnostic messages by setting the `LIQUIDPROJECTIONS_DIAGNOSTICS` condition symbol.
-* If you use this library inside your own packaged library, make sure you set the `LIBLOG_PROVIDERS_ONLY` compiler symbol to prevent the LibLog package from leaking into your consumers. 
+* The `PollingEventStoreAdapter` constructor takes an optional delegate of type `LogMessage` that you can use for logging to your framework of choice. You can also have it log more diagnostic messages by setting the `LIQUIDPROJECTIONS_DIAGNOSTICS` condition symbol.

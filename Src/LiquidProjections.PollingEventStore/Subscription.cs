@@ -3,7 +3,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using LiquidProjections.Abstractions;
-using LiquidProjections.PollingEventStoreAdapter.Logging;
 
 namespace LiquidProjections.PollingEventStore
 {
@@ -15,13 +14,15 @@ namespace LiquidProjections.PollingEventStore
         private bool isDisposed;
         private long lastProcessedCheckpoint;
         private readonly Subscriber subscriber;
+        private readonly LogMessage logger;
 
         public Subscription(PollingEventStoreAdapter eventStoreAdapter, long lastProcessedCheckpoint,
-            Subscriber subscriber, string subscriptionId)
+            Subscriber subscriber, string subscriptionId, LogMessage logger)
         {
             this.eventStoreAdapter = eventStoreAdapter;
             this.lastProcessedCheckpoint = lastProcessedCheckpoint;
             this.subscriber = subscriber;
+            this.logger = logger;
             Id = subscriptionId;
         }
 
@@ -44,8 +45,8 @@ namespace LiquidProjections.PollingEventStore
                 }
 
                 cancellationTokenSource = new CancellationTokenSource();
-#if DEBUG
-                LogProvider.GetLogger(typeof(Subscription)).Debug(() => $"Subscription {Id} has been started.");
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
+                logger(() => $"Subscription {Id} has been started.");
 #endif
 
                 var info = new SubscriptionInfo
@@ -67,8 +68,8 @@ namespace LiquidProjections.PollingEventStore
                             }
                             catch (Exception exception)
                             {
-                                LogProvider.GetLogger(typeof(Subscription)).FatalException(
-                                    "NEventStore polling task has failed. Event subscription has been cancelled.",
+                                logger(() => 
+                                    "NEventStore polling task has failed. Event subscription has been cancelled: " +
                                     exception);
                             }
                         },
@@ -110,8 +111,8 @@ namespace LiquidProjections.PollingEventStore
                     {
                         await subscriber.HandleTransactions(transactions, info).ConfigureAwait(false);
 
-#if DEBUG
-                        LogProvider.GetLogger(typeof(Subscription)).Debug(() =>
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
+                        logger(() =>
                             $"Subscription {Id} has processed a page of size {page.Transactions.Count} " +
                             $"from checkpoint {page.Transactions.First().Checkpoint} " +
                             $"to checkpoint {page.Transactions.Last().Checkpoint}.");
@@ -129,8 +130,8 @@ namespace LiquidProjections.PollingEventStore
 
             try
             {
-#if DEBUG
-                LogProvider.GetLogger(typeof(Subscription)).Debug(() =>
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
+                logger(() =>
                     $"Subscription {Id} is requesting a page after checkpoint {checkpoint}.");
 #endif
 
@@ -138,8 +139,8 @@ namespace LiquidProjections.PollingEventStore
                     .WithWaitCancellation(cancellationTokenSource.Token)
                     .ConfigureAwait(false);
 
-#if DEBUG
-                LogProvider.GetLogger(typeof(Subscription)).Debug(() =>
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
+                logger(() =>
                     $"Subscription {Id} has got a page of size {page.Transactions.Count} " +
                     $"from checkpoint {page.Transactions.First().Checkpoint} " +
                     $"to checkpoint {page.Transactions.Last().Checkpoint}.");
@@ -166,8 +167,8 @@ namespace LiquidProjections.PollingEventStore
                 {
                     isDisposed = true;
 
-#if DEBUG
-                    LogProvider.GetLogger(typeof(Subscription)).Debug(() => $"Subscription {Id} is being stopped.");
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
+                    logger(() => $"Subscription {Id} is being stopped.");
 #endif
 
                     if (cancellationTokenSource != null)
@@ -204,8 +205,8 @@ namespace LiquidProjections.PollingEventStore
         {
             cancellationTokenSource?.Dispose();
             
-#if DEBUG
-            LogProvider.GetLogger(typeof(Subscription)).Debug(() => $"Subscription {Id} has been stopped.");
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
+            logger(() => $"Subscription {Id} has been stopped.");
 #endif
         }
     }
