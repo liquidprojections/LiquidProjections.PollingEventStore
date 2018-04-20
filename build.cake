@@ -1,6 +1,5 @@
 #tool "nuget:?package=xunit.runner.console"
 #tool "nuget:?package=GitVersion.CommandLine"
-#addin "Cake.Incubator"
 
 //////////////////////////////////////////////////////////////////////
 // ARGUMENTS
