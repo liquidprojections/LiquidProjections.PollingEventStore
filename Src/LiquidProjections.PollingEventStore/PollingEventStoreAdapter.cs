@@ -434,7 +434,12 @@ namespace LiquidProjections.PollingEventStore
     /// Represents an event store which does not actively push transactions to LiquidProjections and which 
     /// requires polling.
     /// </summary>
-    public interface IPassiveEventStore
+#if LIQUIDPROJECTIONS_BUILD_TIME
+    public
+#else
+    internal 
+#endif 
+        interface IPassiveEventStore
     {
         /// <summary>
         /// Loads <see cref="Transaction"/>s from the storage in the order that they should be projected (should be the same order that they were persisted).
@@ -454,5 +459,10 @@ namespace LiquidProjections.PollingEventStore
     /// <summary>
     /// Defines a method that can be used to route logging to the logging framework of your choice.
     /// </summary>
-    public delegate void LogMessage(Func<string> message);
+#if LIQUIDPROJECTIONS_BUILD_TIME
+    public
+#else
+    internal 
+#endif
+        delegate void LogMessage(Func<string> message);
 }
