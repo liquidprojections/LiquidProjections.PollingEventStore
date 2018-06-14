@@ -39,29 +39,12 @@ namespace LiquidProjections.PollingEventStore.Specs
             return new[] { Build() };
         }
 
-        public TransactionBuilder WithStreamId(string streamId)
-        {
-            this.streamId = streamId;
-            return this;
-        }
-
-        public TransactionBuilder WithEvents(params Event[] events)
-        {
-            return events.Select(WithEvent).Last();
-        }
-
         public TransactionBuilder WithEvent(Event @event)
         {
             var eventMessage = new EventEnvelopeBuilder().WithBody(@event).Build();
 
             events.Add(eventMessage);
 
-            return this;
-        }
-
-        public TransactionBuilder WithEvent(EventEnvelopeBuilder eventEnvelopeBuilder)
-        {
-            events.Add(eventEnvelopeBuilder.Build());
             return this;
         }
 

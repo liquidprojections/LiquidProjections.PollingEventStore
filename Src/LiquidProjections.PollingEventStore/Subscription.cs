@@ -122,6 +122,10 @@ namespace LiquidProjections.PollingEventStore
 
                         lastProcessedCheckpoint = page.LastCheckpoint;
                     }
+                    else
+                    {
+                        await Task.Delay(pollInterval);
+                    }
                 }
             }
         }

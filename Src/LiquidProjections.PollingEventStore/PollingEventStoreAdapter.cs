@@ -36,7 +36,6 @@ namespace LiquidProjections.PollingEventStore
         /// Stores cached transactions by the checkpoint of their PRECEDING transaction. This ensures that
         /// gaps in checkpoints will not result in cache misses.  
         /// </summary>
-        private CheckpointRequestTimestamp lastSuccessfulPollingRequestWithoutResults;
         private readonly LruCache<long, Transaction> cachedTransactionsByPrecedingCheckpoint;
 
         /// <summary>
@@ -186,32 +185,9 @@ namespace LiquidProjections.PollingEventStore
                     throw new OperationCanceledException();
                 }
 
-                CheckpointRequestTimestamp effectiveLastExistingCheckpointRequest =
-                    Volatile.Read(ref lastSuccessfulPollingRequestWithoutResults);
-
-                if ((effectiveLastExistingCheckpointRequest != null) &&
-                    (effectiveLastExistingCheckpointRequest.PreviousCheckpoint == previousCheckpoint))
-                {
-                    TimeSpan timeAfterPreviousRequest = getUtcNow() - effectiveLastExistingCheckpointRequest.DateTimeUtc;
-                    if (timeAfterPreviousRequest < pollInterval)
-                    {
-                        TimeSpan delay = pollInterval - timeAfterPreviousRequest;
-
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
-                        logger(() =>
-                            $"Subscription {subscriptionId} is waiting " +
-                            $"for {delay} before checking for new transactions.");
-#endif
-
-                        await Task.Delay(delay).ConfigureAwait(false);
-                    }
-                }
-
-                Page candidatePage = await TryLoadNextPageSequentiallyOrWaitForCurrentLoadingToFinish(previousCheckpoint,
-                        subscriptionId)
+                Page candidatePage = await TryLoadNextOrWaitForPreLoadingToFinish(precedingCheckpoint, subscriptionId)
                     .ConfigureAwait(false);
 
-                if (candidatePage.PreviousCheckpoint == previousCheckpoint)
                 if (candidatePage.PrecedingCheckpoint == precedingCheckpoint)
                 {
                     return candidatePage;

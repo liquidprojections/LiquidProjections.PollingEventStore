@@ -58,7 +58,7 @@ namespace LiquidProjections.PollingEventStore.Specs
                 }
                 while (actualTransaction == null);
 
-                actualTransaction.Id.Should().Be(The<Transaction>().Id.ToString());
+                actualTransaction.Id.Should().Be(The<Transaction>().Id);
             }
         }
 
@@ -99,9 +99,9 @@ namespace LiquidProjections.PollingEventStore.Specs
             public async Task Then_it_should_convert_the_commit_details_to_a_transaction()
             {
                 Transaction actualTransaction = await transactionHandledSource.Task.TimeoutAfter(30.Seconds());
-                ;
+                
                 var transaction = The<Transaction>();
-                actualTransaction.Id.Should().Be(transaction.Id.ToString());
+                actualTransaction.Id.Should().Be(transaction.Id);
                 actualTransaction.Checkpoint.Should().Be(transaction.Checkpoint);
                 actualTransaction.TimeStampUtc.Should().Be(transaction.TimeStampUtc);
                 actualTransaction.StreamId.Should().Be(transaction.StreamId);
@@ -338,8 +338,6 @@ namespace LiquidProjections.PollingEventStore.Specs
                 GivenSubject<CreateSubscription>
         {
             private readonly TimeSpan pollingInterval = 500.Milliseconds();
-            private readonly DateTime utcNow = DateTime.UtcNow;
-            private IPassiveEventStore eventStore;
             private readonly ManualResetEventSlim aSubscriptionStartedLoading = new ManualResetEventSlim();
             private readonly ManualResetEventSlim secondSubscriptionCreated = new ManualResetEventSlim();
             private readonly ManualResetEventSlim secondSubscriptionReceivedTheTransaction = new ManualResetEventSlim();
@@ -349,7 +347,7 @@ namespace LiquidProjections.PollingEventStore.Specs
             {
                 Given(() =>
                 {
-                    eventStore = A.Fake<IPassiveEventStore>();
+                    IPassiveEventStore eventStore = A.Fake<IPassiveEventStore>();
                     A.CallTo(() => eventStore.GetFrom(A<long?>.Ignored)).ReturnsLazily(call =>
                     {
                         string checkpointString = call.GetArgument<string>(0);
@@ -370,7 +368,7 @@ namespace LiquidProjections.PollingEventStore.Specs
 
                         return checkpoint > 0
                             ? new Transaction[0]
-                            : new Transaction[] {new TransactionBuilder().WithCheckpoint(1).Build()};
+                            : new[] {new TransactionBuilder().WithCheckpoint(1).Build()};
                     });
 
                     var adapter = new PollingEventStoreAdapter(eventStore, 11, pollingInterval, 100, () => DateTime.UtcNow);
