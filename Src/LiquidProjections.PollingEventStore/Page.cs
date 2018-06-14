@@ -4,16 +4,16 @@ namespace LiquidProjections.PollingEventStore
 {
     internal sealed class Page
     {
-        public Page(long previousCheckpoint, IReadOnlyList<Transaction> transactions)
+        public Page(long precedingCheckpoint, IReadOnlyList<Transaction> transactions)
         {
-            PreviousCheckpoint = previousCheckpoint;
+            PrecedingCheckpoint = precedingCheckpoint;
             Transactions = transactions;
         }
 
         /// <summary>
         /// Gets the checkpoint as it was requested when loading this page.
         /// </summary>
-        public long PreviousCheckpoint { get; }
+        public long PrecedingCheckpoint { get; }
 
         public IReadOnlyList<Transaction> Transactions { get; }
 

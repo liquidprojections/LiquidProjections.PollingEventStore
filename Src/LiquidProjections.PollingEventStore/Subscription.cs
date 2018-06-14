@@ -14,14 +14,16 @@ namespace LiquidProjections.PollingEventStore
         private bool isDisposed;
         private long lastProcessedCheckpoint;
         private readonly Subscriber subscriber;
+        private readonly TimeSpan pollInterval;
         private readonly LogMessage logger;
 
         public Subscription(PollingEventStoreAdapter eventStoreAdapter, long lastProcessedCheckpoint,
-            Subscriber subscriber, string subscriptionId, LogMessage logger)
+            Subscriber subscriber, string subscriptionId, TimeSpan pollInterval, LogMessage logger)
         {
             this.eventStoreAdapter = eventStoreAdapter;
             this.lastProcessedCheckpoint = lastProcessedCheckpoint;
             this.subscriber = subscriber;
+            this.pollInterval = pollInterval;
             this.logger = logger;
             Id = subscriptionId;
         }
@@ -57,23 +59,23 @@ namespace LiquidProjections.PollingEventStore
                 };
 
                 Task = Task.Run(async () =>
+                    {
+                        try
                         {
-                            try
-                            {
-                                await RunAsync(info).ConfigureAwait(false);
-                            }
-                            catch (OperationCanceledException)
-                            {
-                                // Do nothing.
-                            }
-                            catch (Exception exception)
-                            {
-                                logger(() => 
-                                    "NEventStore polling task has failed. Event subscription has been cancelled: " +
-                                    exception);
-                            }
-                        },
-                        CancellationToken.None);
+                            await RunAsync(info).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            // Do nothing.
+                        }
+                        catch (Exception exception)
+                        {
+                            logger(() =>
+                                "NEventStore polling task has failed. Event subscription has been cancelled: " +
+                                exception);
+                        }
+                    },
+                    CancellationToken.None);
             }
         }
 
@@ -183,11 +185,11 @@ namespace LiquidProjections.PollingEventStore
                         }
                     }
 
-                    lock (eventStoreAdapter.subscriptionLock)
+                    lock (eventStoreAdapter.SubscriptionLock)
                     {
-                        eventStoreAdapter.subscriptions.Remove(this);
+                        eventStoreAdapter.Subscriptions.Remove(this);
                     }
-                    
+
                     if (Task == null)
                     {
                         FinishDisposing();
@@ -204,7 +206,7 @@ namespace LiquidProjections.PollingEventStore
         private void FinishDisposing()
         {
             cancellationTokenSource?.Dispose();
-            
+
 #if LIQUIDPROJECTIONS_DIAGNOSTICS
             logger(() => $"Subscription {Id} has been stopped.");
 #endif
