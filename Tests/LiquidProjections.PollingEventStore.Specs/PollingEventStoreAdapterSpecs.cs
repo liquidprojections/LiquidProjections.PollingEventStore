@@ -350,11 +350,7 @@ namespace LiquidProjections.PollingEventStore.Specs
                     IPassiveEventStore eventStore = A.Fake<IPassiveEventStore>();
                     A.CallTo(() => eventStore.GetFrom(A<long?>.Ignored)).ReturnsLazily(call =>
                     {
-                        string checkpointString = call.GetArgument<string>(0);
-
-                        long checkpoint = string.IsNullOrEmpty(checkpointString)
-                            ? 0
-                            : long.Parse(checkpointString, CultureInfo.InvariantCulture);
+                        long checkpoint = call.GetArgument<long?>(0) ?? 0; 
 
                         aSubscriptionStartedLoading.Set();
 
@@ -377,31 +373,24 @@ namespace LiquidProjections.PollingEventStore.Specs
 
                 When(() =>
                 {
-                    Subject(
-                        0,
-                        new Subscriber
-                        {
-                            HandleTransactions = (transactions, info) => Task.FromResult(0)
-                        },
-                        "firstId");
+                    Subject(0, new Subscriber 
+                    {
+                        HandleTransactions = (transactions, info) => Task.FromResult(0)
+                    }, "firstId");
 
                     if (!aSubscriptionStartedLoading.Wait(TimeSpan.FromSeconds(10)))
                     {
                         throw new InvalidOperationException("The first subscription has not started loading in 10 seconds.");
                     }
 
-                    Subject(
-                        null,
-                        new Subscriber
+                    Subject(null, new Subscriber
+                    {
+                        HandleTransactions = (transactions, info) =>
                         {
-                            HandleTransactions = (transactions, info) =>
-                            {
-                                secondSubscriptionReceivedTheTransaction.Set();
-                                return Task.FromResult(0);
-                            }
-                        },
-                        "secondId"
-                    );
+                            secondSubscriptionReceivedTheTransaction.Set();
+                            return Task.FromResult(0);
+                        }
+                    }, "secondId");
 
                     secondSubscriptionCreated.Set();
                 });
@@ -420,24 +409,23 @@ namespace LiquidProjections.PollingEventStore.Specs
         public class When_the_subscriber_cancels_the_subscription_from_inside_its_transaction_handler :
             GivenSubject<PollingEventStoreAdapter>
         {
-            private readonly TimeSpan pollingInterval = 500.Milliseconds();
-            private readonly DateTime utcNow = DateTime.UtcNow;
             private readonly ManualResetEventSlim disposed = new ManualResetEventSlim();
 
             public When_the_subscriber_cancels_the_subscription_from_inside_its_transaction_handler()
             {
                 Given(() =>
                 {
-                    UseThe(new TransactionBuilder().WithCheckpoint(123).Build());
-
                     UseThe(A.Fake<IPassiveEventStore>());
-                    A.CallTo(() => The<IPassiveEventStore>().GetFrom(A<long?>.Ignored)).Returns(new[] { The<Transaction>() });
+                    A.CallTo(() => The<IPassiveEventStore>().GetFrom(A<long?>.Ignored)).Returns(new[]
+                    {
+                        new TransactionBuilder().WithCheckpoint(123).Build()
+                    });
 
-                    WithSubject(_ => new PollingEventStoreAdapter(The<IPassiveEventStore>(), 11, pollingInterval, 100,
-                        () => utcNow));
+                    WithSubject(_ => new PollingEventStoreAdapter(The<IPassiveEventStore>(), 11, 500.Milliseconds(), 100,
+                        () => DateTime.UtcNow));
                 });
 
-                When(() => Subject.Subscribe(null,
+                When(() => Subject.Subscribe(0,
                     new Subscriber
                     {
                         HandleTransactions = (transactions, info) =>
