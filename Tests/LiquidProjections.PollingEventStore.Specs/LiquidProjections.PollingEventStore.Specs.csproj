@@ -30,23 +30,27 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="Chill, Version=3.0.1.0, Culture=neutral, processorArchitecture=MSIL">
-      <HintPath>..\..\packages\Chill.3.0.1\lib\net45\Chill.dll</HintPath>
+    <Reference Include="Chill, Version=3.2.0.0, Culture=neutral, PublicKeyToken=null">
+      <HintPath>..\..\packages\Chill.3.2.0\lib\net45\Chill.dll</HintPath>
+      <Private>True</Private>
     </Reference>
-    <Reference Include="FakeItEasy, Version=3.4.2.0, Culture=neutral, PublicKeyToken=eff28e2146d5fd2c, processorArchitecture=MSIL">
-      <HintPath>..\..\packages\FakeItEasy.3.4.2\lib\net45\FakeItEasy.dll</HintPath>
+    <Reference Include="FakeItEasy, Version=4.0.0.0, Culture=neutral, PublicKeyToken=eff28e2146d5fd2c">
+      <HintPath>..\..\packages\FakeItEasy.4.6.0\lib\net45\FakeItEasy.dll</HintPath>
+      <Private>True</Private>
     </Reference>
-    <Reference Include="FluentAssertions, Version=4.19.3.0, Culture=neutral, PublicKeyToken=33f2691a05b67b6a, processorArchitecture=MSIL">
-      <HintPath>..\..\packages\FluentAssertions.4.19.3\lib\net45\FluentAssertions.dll</HintPath>
-    </Reference>
-    <Reference Include="FluentAssertions.Core, Version=4.19.3.0, Culture=neutral, PublicKeyToken=33f2691a05b67b6a, processorArchitecture=MSIL">
-      <HintPath>..\..\packages\FluentAssertions.4.19.3\lib\net45\FluentAssertions.Core.dll</HintPath>
+    <Reference Include="FluentAssertions, Version=5.4.1.0, Culture=neutral, PublicKeyToken=33f2691a05b67b6a">
+      <HintPath>..\..\packages\FluentAssertions.5.4.1\lib\net45\FluentAssertions.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="LiquidProjections.Abstractions, Version=2.3.0.0, Culture=neutral, PublicKeyToken=null">
       <HintPath>..\..\packages\LiquidProjections.Abstractions.2.3.0\lib\netstandard1.1\LiquidProjections.Abstractions.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
+    <Reference Include="System.ValueTuple, Version=4.0.2.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51">
+      <HintPath>..\..\packages\System.ValueTuple.4.4.0\lib\netstandard1.0\System.ValueTuple.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="Microsoft.CSharp" />
@@ -67,6 +71,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="TransactionBatchBuilder.cs" />
     <Compile Include="TransactionBuilder.cs" />
     <Compile Include="Event.cs" />
     <Compile Include="EventEnvelopeBuilder.cs" />

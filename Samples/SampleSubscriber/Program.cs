@@ -1,9 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
-using FluentAssertions;
 using LiquidProjections;
 using LiquidProjections.Abstractions;
 using LiquidProjections.PollingEventStore;
@@ -14,12 +14,15 @@ namespace SampleSubscriber
     {
         static void Main(string[] args)
         {
-//            var adapter = new PollingEventStoreAdapter(new PassiveEventStore(), 0, 5.Seconds(), 1000, () => DateTime.UtcNow, messageFunc => Console.WriteLine(messageFunc()));
-            var adapter = new PollingEventStoreAdapter(new PassiveEventStore(), 0, 5.Seconds(), 1000, () => DateTime.UtcNow);
-
-            int maxSubscrbiers = 5;
+            var stopWatch = new Stopwatch();
+            stopWatch.Start();
             
-            for (int id = 0; id < maxSubscrbiers; id++)
+//            var adapter = new PollingEventStoreAdapter(new PassiveEventStore(), 50000, 5.Seconds(), 1000, () => DateTime.UtcNow, messageFunc => Console.WriteLine(messageFunc()));
+            var adapter = new PollingEventStoreAdapter(new PassiveEventStore(), 50000, TimeSpan.FromSeconds(5), 1000, () => DateTime.UtcNow);
+
+            int maxSubscribers = 10;
+            
+            for (int id = 0; id < maxSubscribers; id++)
             {
                 int localId = id;
                 adapter.Subscribe(0, new Subscriber
@@ -27,16 +30,18 @@ namespace SampleSubscriber
                     HandleTransactions = (transactions, info) =>
                     {
                         Console.WriteLine(
-                            $"Subscriber {info.Id} received transactions {transactions.First().Checkpoint} to {transactions.Last().Checkpoint} on thead {Thread.CurrentThread.ManagedThreadId}");
+                            $"{stopWatch.Elapsed}: Subscriber {info.Id} received transactions {transactions.First().Checkpoint} to {transactions.Last().Checkpoint} on thead {Thread.CurrentThread.ManagedThreadId}");
 
-                        Thread.Sleep(500);
+                        Thread.Sleep(new Random().Next(100, 500));
 
                         return Task.FromResult(0);
                     },
                     NoSuchCheckpoint = info => Task.FromResult(0)
                 }, id.ToString());
 
-                Console.WriteLine($"Started subscriber {localId}");
+                Console.WriteLine($"{stopWatch.Elapsed}: Started subscriber {localId}");
+                
+                Thread.Sleep(1000);
             }
             
             Console.WriteLine("Press a key to shutdown");

@@ -18,5 +18,7 @@ namespace LiquidProjections.PollingEventStore
         public IReadOnlyList<Transaction> Transactions { get; }
 
         public long LastCheckpoint => Transactions.Count == 0 ? 0 : Transactions[Transactions.Count - 1].Checkpoint;
+
+        public bool IsEmpty => (Transactions.Count == 0);
     }
 }
