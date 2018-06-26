@@ -211,7 +211,7 @@ namespace LiquidProjections.PollingEventStore.Specs
                 PollingCall lastButOneCall = pollingTimeStamps.Reverse().Skip(1).Take(1).Single();
                 PollingCall lastCall = pollingTimeStamps.Last();
 
-                lastCall.TimeStampUtc.Should().BeAtLeast(pollingInterval).After(lastButOneCall.TimeStampUtc);
+                lastCall.TimeStampUtc.Should().BeAtLeast(pollingInterval.Subtract(100.Milliseconds())).After(lastButOneCall.TimeStampUtc);
                 lastCall.Checkpoint.Should().Be(lastButOneCall.Checkpoint);
             }
 
@@ -636,22 +636,22 @@ namespace LiquidProjections.PollingEventStore.Specs
                     {
                         HandleTransactions = (_, info) =>
                         {
-                            info.Subscription.Dispose();
-                            
                             firstPageIsLoadedInCache.SetResult(true);
 
                             return Task.FromResult(0);
                         }
                     }, "id");
 
-                    await subscription.Disposed;
+                    await firstPageIsLoadedInCache.Task;
+
+                    subscription.Dispose();
+                    ;await subscription.Disposed;
                 });
             }
 
             [Fact]
             public async Task Then_it_should_preload_the_next_page()
             {
-                await firstPageIsLoadedInCache.Task;
 
                 requestedCheckpoints.Should().BeEquivalentTo(new[] {0, 1000});
             }
@@ -763,5 +763,73 @@ namespace LiquidProjections.PollingEventStore.Specs
             }
         }
 
+        public class When_a_successive_request_mostly_overlaps_with_a_prior_cached_request :
+            GivenSubject<PollingEventStoreAdapter>
+        {
+            private int pageSize = 1000;
+            private TaskCompletionSource<Transaction[]> secondSubscriberReceivedPage =  new TaskCompletionSource<Transaction[]>();
+            private TaskCompletionSource<bool> firstRequestStarted = new TaskCompletionSource<bool>();
+            private TaskCompletionSource<bool> secondSubcriberSubscribed = new TaskCompletionSource<bool>();
+
+            public When_a_successive_request_mostly_overlaps_with_a_prior_cached_request()
+            {
+                Given(async () =>
+                {
+                    var eventStore = A.Fake<IPassiveEventStore>();
+                    A.CallTo(() => eventStore.GetFrom(A<long?>.Ignored)).ReturnsLazily(call =>
+                    {
+                        firstRequestStarted.SetResult(true);
+
+                        secondSubcriberSubscribed.Task.Wait();
+                        
+                        long precedingCheckpoint = call.GetArgument<long?>(0) ?? 0;
+
+                        return Enumerable.Range((int) precedingCheckpoint + 1, pageSize)
+                            .Select(cp => new TransactionBuilder().WithCheckpoint(cp).Build()).ToArray();
+                    });
+
+                    WithSubject(_ => new PollingEventStoreAdapter(eventStore, cacheSize: pageSize * 2,
+                        pollInterval: 500.Milliseconds(), maxPageSize: pageSize, getUtcNow: () => DateTime.Now));
+                });
+
+                When(async () =>
+                {
+                    Subject.Subscribe(0, new Subscriber
+                    {
+                        HandleTransactions = (transactions, info) =>
+                        {
+                            info.Subscription.Dispose();
+
+                            return Task.FromResult(0);
+                        }
+                    }, "first");
+
+                    await firstRequestStarted.Task;
+                    
+                    Subject.Subscribe(250, new Subscriber
+                    {
+                        HandleTransactions = (transactions, info) =>
+                        {
+                            secondSubscriberReceivedPage.SetResult(transactions.ToArray());
+                           
+                            
+                            info.Subscription.Dispose();
+
+                            return Task.FromResult(0);
+                        }
+                    }, "second");
+                    
+                    secondSubcriberSubscribed.SetResult(true);
+                });
+            }
+
+            [Fact]
+            public async Task Then_the_resulting_page_should_contain_the_cached_transactions()
+            {
+                Transaction[] page = await secondSubscriberReceivedPage.Task;
+                
+                page.Should().HaveCount(750);
+            }
+        }
     }
 }

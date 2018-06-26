@@ -20,7 +20,7 @@ namespace SampleSubscriber
 //            var adapter = new PollingEventStoreAdapter(new PassiveEventStore(), 50000, 5.Seconds(), 1000, () => DateTime.UtcNow, messageFunc => Console.WriteLine(messageFunc()));
             var adapter = new PollingEventStoreAdapter(new PassiveEventStore(), 50000, TimeSpan.FromSeconds(5), 1000, () => DateTime.UtcNow);
 
-            int maxSubscribers = 10;
+            int maxSubscribers = 50;
             
             for (int id = 0; id < maxSubscribers; id++)
             {
@@ -54,9 +54,12 @@ namespace SampleSubscriber
     internal class PassiveEventStore : IPassiveEventStore
     {
         private const long MaxCheckpoint = 100000;
+        private int nrRequests = 0;
         
         public IEnumerable<Transaction> GetFrom(long? previousCheckpoint)
         {
+            Interlocked.Increment(ref nrRequests);
+            
             previousCheckpoint = previousCheckpoint ?? 0;
             if (previousCheckpoint > MaxCheckpoint)
             {
@@ -81,6 +84,8 @@ namespace SampleSubscriber
             }
             
             Thread.Sleep(1000);
+            
+            Console.WriteLine($"Number of event store requests: {nrRequests}");
 
             return transactions;
         }

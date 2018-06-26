@@ -140,11 +140,14 @@ namespace LiquidProjections.PollingEventStore
         internal async Task<Page> GetNextPage(long precedingCheckpoint, string subscriptionId,
             CancellationToken cancellationToken)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            
             Page pageFromCache = TryGetNextPageFromCache(precedingCheckpoint, subscriptionId, cancellationToken);
             if (!pageFromCache.IsEmpty)
             {
+                if (pageFromCache.Transactions.Count < maxPageSize)
+                {
+                    Task _ = RequestPageLoad(subscriptionId, pageFromCache.LastCheckpoint, cancellationToken);
+                }
+                
                 return pageFromCache;
             }
 
@@ -193,7 +196,6 @@ namespace LiquidProjections.PollingEventStore
                     }
                     else
                     {
-                        Task _ = RequestPageLoad(subscriptionId, lastCheckpoint, cancellationToken);
                         break;
                     }
                 }
@@ -218,7 +220,7 @@ namespace LiquidProjections.PollingEventStore
                 PrecedingCheckpoint = precedingCheckpoint,
                 CancellationToken = cancellationToken
             };
-            
+
             pendingRequests.Enqueue(loadRequest);
             requestQueued.TrySetResult(true);
 
@@ -235,31 +237,7 @@ namespace LiquidProjections.PollingEventStore
                     {
                         await WaitForPendingRequest();
 
-                        // Keep the request on the queue, so the subscriber can wait the result of preloading the next page.
-                        if (pendingRequests.TryPeek(out LoadRequest request))
-                        {
-                            try
-                            {
-                                Page page = await LoadPage(request.PrecedingCheckpoint, request.SubscriptionId, request.CancellationToken);
-                                if (!page.IsEmpty)
-                                {
-                                    CachePage(page, request.SubscriptionId);
-                                }
-
-                                request.SetResult(page);
-                            }
-                            catch
-                            {
-                                // Ignore the exception and have the subscriber try again if it wants to.
-                                request.SetResult(null);
-                            }
-                            finally
-                            {
-                                // By now, the result is available in the cache, so subscribers that were too late to await
-                                // the preload can benefit from it as well.
-                                pendingRequests.TryDequeue(out LoadRequest _);
-                            }
-                        }
+                        await ProcessPendingRequest();
                     }
                 }
                 catch (OperationCanceledException)
@@ -280,6 +258,72 @@ namespace LiquidProjections.PollingEventStore
 
                     await requestQueued.Task.WithWaitCancellation(disposingCancellationTokenSource.Token);
                 }
+            }
+        }
+
+        private async Task ProcessPendingRequest()
+        {
+            // Keep the request on the queue, so successive subscribers for the same page can "await"
+            // the result of the existing request
+            if (pendingRequests.TryPeek(out LoadRequest request))
+            {
+                try
+                {
+                    if (IsMajorityCached(request.PrecedingCheckpoint))
+                    {
+                        request.SetResult(TryGetNextPageFromCache(request.PrecedingCheckpoint, request.SubscriptionId,
+                            request.CancellationToken));
+                    }
+                    else
+                    {
+                        Page page = await LoadPage(request.PrecedingCheckpoint, request.SubscriptionId,
+                            request.CancellationToken);
+                        
+                        if (!page.IsEmpty)
+                        {
+                            CachePage(page, request.SubscriptionId);
+                        }
+
+                        request.SetResult(page);
+                    }
+                }
+                catch
+                {
+                    // Ignore the exception and have the subscriber try again if it wants to.
+                    request.SetResult(null);
+                }
+                finally
+                {
+                    // By now, the page should be available in the cache, so subscribers that were too late to "await"
+                    // the current request can still get it from the cache.
+                    pendingRequests.TryDequeue(out LoadRequest _);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Determines whether a majority of the requested page is already cached. 
+        /// </summary>
+        private bool IsMajorityCached(long requestPrecedingCheckpoint)
+        {
+            double fillFactor = 0.5;
+            int threshold = (int) (maxPageSize * fillFactor);
+            int actual = 0;
+
+            if (cachedTransactionsByPrecedingCheckpoint != null)
+            {
+                while (cachedTransactionsByPrecedingCheckpoint.TryGet(requestPrecedingCheckpoint, out Transaction transaction) &&
+                       (actual <= threshold))
+                {
+                    actual++;
+                    requestPrecedingCheckpoint = transaction.Checkpoint;
+                }
+
+                return actual > threshold;
+            }
+            else
+            {
+                return false;
             }
         }
 
@@ -350,33 +394,33 @@ namespace LiquidProjections.PollingEventStore
 
         public void Dispose()
         {
-            lock (subscriptionLock)
+            if (!disposingCancellationTokenSource.IsCancellationRequested)
             {
-                if (!disposingCancellationTokenSource.IsCancellationRequested)
-                {
-                    disposingCancellationTokenSource.Cancel();
+                disposingCancellationTokenSource.Cancel();
 
+                lock (subscriptionLock)
+                {
                     foreach (Subscription subscription in subscriptions)
                     {
                         subscription.Complete();
                     }
-
-                    // New loading tasks are no longer started at this point.
-                    // After the current loading task is finished, the event store is no longer used and can be disposed.
-                    Task taskToWaitFor = Volatile.Read(ref loader);
-
-                    try
-                    {
-                        taskToWaitFor?.Wait();
-                    }
-                    catch (AggregateException)
-                    {
-                        // Ignore.
-                    }
-
-                    // ReSharper disable once SuspiciousTypeConversion.Global
-                    (eventStore as IDisposable)?.Dispose();
                 }
+
+                // New loading tasks are no longer started at this point.
+                // After the current loading task is finished, the event store is no longer used and can be disposed.
+                Task taskToWaitFor = Volatile.Read(ref loader);
+
+                try
+                {
+                    taskToWaitFor?.Wait();
+                }
+                catch (AggregateException)
+                {
+                    // Ignore.
+                }
+
+                // ReSharper disable once SuspiciousTypeConversion.Global
+                (eventStore as IDisposable)?.Dispose();
             }
         }
     }

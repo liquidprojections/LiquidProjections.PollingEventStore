@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -34,7 +33,7 @@ namespace LiquidProjections.PollingEventStore
             {
             });
 #else
-            this.logger= _ => {};
+            this.logger = _ => {};
 #endif
         }
 
@@ -53,9 +52,7 @@ namespace LiquidProjections.PollingEventStore
                 }
 
                 cancellationTokenSource = new CancellationTokenSource();
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
                 logger(() => $"Subscription {id} has been started.");
-#endif
 
                 task = Task.Run(async () =>
                     {
@@ -87,57 +84,64 @@ namespace LiquidProjections.PollingEventStore
 
         private async Task RunAsync(SubscriptionInfo info)
         {
-            const int offsetToDetectAheadSubscriber = 1;
-            long actualRequestedLastCheckpoint = lastProcessedCheckpoint;
-            lastProcessedCheckpoint = lastProcessedCheckpoint > 0 ? lastProcessedCheckpoint - offsetToDetectAheadSubscriber : 0;
-            bool firstRequestAfterSubscribing = true;
+            Page page = await HandleFirstRequestToDetectAheadSubscribers(lastProcessedCheckpoint, info);
 
             while (!cancellationTokenSource.IsCancellationRequested)
             {
-                Page page = await TryGetNextPage(lastProcessedCheckpoint).ConfigureAwait(false);
-                if (page != null)
+                if (page != null && !page.IsEmpty)
                 {
-                    IReadOnlyList<Transaction> transactions = page.Transactions;
+                    await PublishToSubscriber(info, page);
 
-                    if (firstRequestAfterSubscribing)
-                    {
-                        if (!transactions.Any())
-                        {
-                            await subscriber.NoSuchCheckpoint(info).ConfigureAwait(false);
-                        }
-                        else
-                        {
-                            transactions = transactions
-                                .Where(t => t.Checkpoint > actualRequestedLastCheckpoint)
-                                .ToReadOnlyList();
-                        }
-
-                        firstRequestAfterSubscribing = false;
-                    }
-
-                    if (transactions.Count > 0)
-                    {
-                        await Task.Run(() => subscriber.HandleTransactions(transactions, info)).ConfigureAwait(false);
-
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
-                        logger(() =>
-                            $"Subscription {id} has processed a page of size {page.Transactions.Count} " +
-                            $"from checkpoint {page.Transactions.First().Checkpoint} " +
-                            $"to checkpoint {page.Transactions.Last().Checkpoint}.");
-#endif
-
-                        lastProcessedCheckpoint = page.LastCheckpoint;
-                    }
-                    else
-                    {
-                        await Task.Delay(pollInterval);
-                    }
+                    lastProcessedCheckpoint = page.LastCheckpoint;
                 }
                 else
                 {
                     await Task.Delay(pollInterval);
                 }
+
+                page = await TryGetNextPage(lastProcessedCheckpoint);
             }
+        }
+
+        private async Task<Page> HandleFirstRequestToDetectAheadSubscribers(long precedingCheckpoint, SubscriptionInfo info)
+        {
+            const int offsetToDetectAheadSubscriber = 1;
+
+            long actualPrecedingCheckpoint = precedingCheckpoint;
+            precedingCheckpoint = precedingCheckpoint > 0 ? precedingCheckpoint - offsetToDetectAheadSubscriber : 0;
+
+            Transaction[] transactions = null;
+            
+            Page page = await TryGetNextPage(precedingCheckpoint).ConfigureAwait(false);
+            if (page != null)
+            {
+                transactions = page.Transactions.ToArray();
+                if (!transactions.Any())
+                {
+                    await subscriber.NoSuchCheckpoint(info).ConfigureAwait(false);
+                }
+                else
+                {
+                    transactions = transactions
+                        .Where(t => t.Checkpoint > actualPrecedingCheckpoint)
+                        .ToArray();
+
+                    page = new Page(actualPrecedingCheckpoint, transactions);
+                }
+            }
+
+            return page;
+        }
+
+        private async Task PublishToSubscriber(SubscriptionInfo info, Page page)
+        {
+            // Don't block the polling adapter from pushing transactions to other subscribers.
+            await Task.Run(() => subscriber.HandleTransactions(page.Transactions, info)).ConfigureAwait(false);
+
+            logger(() =>
+                $"Subscription {id} has processed a page of size {page.Transactions.Count} " +
+                $"from checkpoint {page.Transactions.First().Checkpoint} " +
+                $"to checkpoint {page.LastCheckpoint}.");
         }
 
         private async Task<Page> TryGetNextPage(long checkpoint)
@@ -146,20 +150,15 @@ namespace LiquidProjections.PollingEventStore
 
             try
             {
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
-                logger(() =>
-                    $"Request Page (subscription: {id}, precedingCheckpoint: {checkpoint}).");
-#endif
+                logger(() => $"Request Page (subscription: {id}, precedingCheckpoint: {checkpoint}).");
 
                 page = await eventStoreAdapter.GetNextPage(checkpoint, id, cancellationTokenSource.Token)
                     .WithWaitCancellation(cancellationTokenSource.Token)
                     .ConfigureAwait(false);
 
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
                 logger(() =>
                     $"Received Page (subscription: {id}, size: {page.Transactions.Count}, " +
                     $"range: {page.Transactions.First().Checkpoint}-{page.Transactions.Last().Checkpoint}.");
-#endif
             }
             catch
             {
@@ -183,9 +182,7 @@ namespace LiquidProjections.PollingEventStore
                 {
                     isDisposed = true;
 
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
                     logger(() => $"Subscription {id} is being stopped.");
-#endif
 
                     if (cancellationTokenSource != null)
                     {
@@ -214,12 +211,10 @@ namespace LiquidProjections.PollingEventStore
 
         private void FinishDisposing()
         {
-                    cancellationTokenSource?.Dispose();
+            cancellationTokenSource?.Dispose();
 
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
             logger(() => $"Subscription {id} has been stopped.");
-#endif
-                }
+        }
 
         public Task Disposed
         {
