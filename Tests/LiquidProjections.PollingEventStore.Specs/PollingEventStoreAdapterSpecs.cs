@@ -1,13 +1,14 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
+using System.Security.AccessControl;
 using System.Threading;
 using System.Threading.Tasks;
 using Chill;
 using FakeItEasy;
 using FluentAssertions;
+using FluentAssertions.Extensions;
 using LiquidProjections.Abstractions;
 using Xunit;
 
@@ -99,14 +100,15 @@ namespace LiquidProjections.PollingEventStore.Specs
             public async Task Then_it_should_convert_the_commit_details_to_a_transaction()
             {
                 Transaction actualTransaction = await transactionHandledSource.Task.TimeoutAfter(30.Seconds());
-                
+
                 var transaction = The<Transaction>();
                 actualTransaction.Id.Should().Be(transaction.Id);
                 actualTransaction.Checkpoint.Should().Be(transaction.Checkpoint);
                 actualTransaction.TimeStampUtc.Should().Be(transaction.TimeStampUtc);
                 actualTransaction.StreamId.Should().Be(transaction.StreamId);
 
-                actualTransaction.Events.ShouldBeEquivalentTo(transaction.Events, options => options.ExcludingMissingMembers());
+                actualTransaction.Events.Should()
+                    .BeEquivalentTo(transaction.Events, options => options.ExcludingMissingMembers());
             }
         }
 
@@ -164,26 +166,27 @@ namespace LiquidProjections.PollingEventStore.Specs
                 {
                     var eventStore = A.Fake<IPassiveEventStore>();
 
-                    A.CallTo(() => eventStore.GetFrom(A<long?>.Ignored)).ReturnsLazily<IEnumerable<Transaction>, long?>(checkpoint =>
-                    {
-                        pollingTimeStamps.Add(new PollingCall(checkpoint, DateTime.UtcNow));
-                        if (pollingTimeStamps.Count == 4)
+                    A.CallTo(() => eventStore.GetFrom(A<long?>.Ignored)).ReturnsLazily<IEnumerable<Transaction>, long?>(
+                        checkpoint =>
                         {
-                            pollingCompleted.SetResult(true);
-                        }
+                            pollingTimeStamps.Add(new PollingCall(checkpoint, DateTime.UtcNow));
+                            if (pollingTimeStamps.Count == 4)
+                            {
+                                pollingCompleted.SetResult(true);
+                            }
 
-                        long checkPoint = checkpoint ?? 0;
-                        long offsetToDetectAheadSubscriber = 1;
+                            long checkPoint = checkpoint ?? 0;
+                            long offsetToDetectAheadSubscriber = 1;
 
-                        if (checkPoint <= (subscriptionCheckpoint - offsetToDetectAheadSubscriber))
-                        {
-                            return new TransactionBuilder().WithCheckpoint(checkPoint + 1).BuildAsEnumerable();
-                        }
-                        else
-                        {
-                            return new Transaction[0];
-                        }
-                    });
+                            if (checkPoint <= (subscriptionCheckpoint - offsetToDetectAheadSubscriber))
+                            {
+                                return new TransactionBuilder().WithCheckpoint(checkPoint + 1).BuildAsEnumerable();
+                            }
+                            else
+                            {
+                                return new Transaction[0];
+                            }
+                        });
 
                     var adapter = new PollingEventStoreAdapter(eventStore, 0, pollingInterval, 100, () => DateTime.UtcNow);
                     WithSubject(_ => adapter.Subscribe);
@@ -211,18 +214,18 @@ namespace LiquidProjections.PollingEventStore.Specs
                 lastCall.TimeStampUtc.Should().BeAtLeast(pollingInterval).After(lastButOneCall.TimeStampUtc);
                 lastCall.Checkpoint.Should().Be(lastButOneCall.Checkpoint);
             }
-        }
 
-        internal class PollingCall
-        {
-            public PollingCall(long? checkpoint, DateTime timeStampUtc)
+            private class PollingCall
             {
-                Checkpoint = checkpoint;
-                TimeStampUtc = timeStampUtc;
+                public PollingCall(long? checkpoint, DateTime timeStampUtc)
+                {
+                    Checkpoint = checkpoint;
+                    TimeStampUtc = timeStampUtc;
+                }
+        
+                public long? Checkpoint { get; set; }
+                public DateTime TimeStampUtc { get; set; }
             }
-
-            public long? Checkpoint { get; set; }
-            public DateTime TimeStampUtc { get; set; }
         }
 
         public class When_a_commit_is_already_projected : GivenSubject<CreateSubscription>
@@ -267,11 +270,11 @@ namespace LiquidProjections.PollingEventStore.Specs
             }
         }
 
-        public class When_disposing : GivenSubject<PollingEventStoreAdapter>
+        public class When_disposing_the_adapter : GivenSubject<PollingEventStoreAdapter>
         {
             private readonly DateTime utcNow = DateTime.UtcNow;
 
-            public When_disposing()
+            public When_disposing_the_adapter()
             {
                 Given(() =>
                 {
@@ -292,7 +295,7 @@ namespace LiquidProjections.PollingEventStore.Specs
             [Fact]
             public void Then_it_should_stop()
             {
-                if (!Task.Run(() => WhenAction.ShouldNotThrow()).Wait(TimeSpan.FromSeconds(10)))
+                if (!Task.Run(() => WhenAction.Should().NotThrow()).Wait(TimeSpan.FromSeconds(10)))
                 {
                     throw new InvalidOperationException("The adapter has not stopped in 10 seconds.");
                 }
@@ -326,7 +329,7 @@ namespace LiquidProjections.PollingEventStore.Specs
             [Fact]
             public void Then_it_should_stop()
             {
-                if (!Task.Run(() => WhenAction.ShouldNotThrow()).Wait(TimeSpan.FromSeconds(10)))
+                if (!Task.Run(() => WhenAction.Should().NotThrow()).Wait(TimeSpan.FromSeconds(10)))
                 {
                     throw new InvalidOperationException("The subscription has not stopped in 10 seconds.");
                 }
@@ -350,7 +353,7 @@ namespace LiquidProjections.PollingEventStore.Specs
                     IPassiveEventStore eventStore = A.Fake<IPassiveEventStore>();
                     A.CallTo(() => eventStore.GetFrom(A<long?>.Ignored)).ReturnsLazily(call =>
                     {
-                        long checkpoint = call.GetArgument<long?>(0) ?? 0; 
+                        long checkpoint = call.GetArgument<long?>(0) ?? 0;
 
                         aSubscriptionStartedLoading.Set();
 
@@ -373,7 +376,7 @@ namespace LiquidProjections.PollingEventStore.Specs
 
                 When(() =>
                 {
-                    Subject(0, new Subscriber 
+                    Subject(0, new Subscriber
                     {
                         HandleTransactions = (transactions, info) => Task.FromResult(0)
                     }, "firstId");
@@ -405,7 +408,7 @@ namespace LiquidProjections.PollingEventStore.Specs
                 }
             }
         }
-        
+
         public class When_the_subscriber_cancels_the_subscription_from_inside_its_transaction_handler :
             GivenSubject<PollingEventStoreAdapter>
         {
@@ -447,7 +450,7 @@ namespace LiquidProjections.PollingEventStore.Specs
                 }
             }
         }
-        
+
         public class When_the_transaction_handler_has_delay_which_uses_the_cancellation_token_and_the_subscription_is_cancelled :
             GivenSubject<PollingEventStoreAdapter>
         {
@@ -464,7 +467,7 @@ namespace LiquidProjections.PollingEventStore.Specs
                     UseThe(new TransactionBuilder().WithCheckpoint(123).Build());
 
                     UseThe(A.Fake<IPassiveEventStore>());
-                    A.CallTo(() => The<IPassiveEventStore>().GetFrom(A<long?>.Ignored)).Returns(new[] { The<Transaction>() });
+                    A.CallTo(() => The<IPassiveEventStore>().GetFrom(A<long?>.Ignored)).Returns(new[] {The<Transaction>()});
 
                     WithSubject(_ => new PollingEventStoreAdapter(The<IPassiveEventStore>(), 11, pollingInterval, 100,
                         () => utcNow));
@@ -475,7 +478,7 @@ namespace LiquidProjections.PollingEventStore.Specs
                             HandleTransactions = async (transactions, info) =>
                             {
                                 transactionHandlerStarted.Set();
-                                
+
                                 try
                                 {
                                     await Task.Delay(TimeSpan.FromDays(1), info.CancellationToken.Value);
@@ -505,5 +508,260 @@ namespace LiquidProjections.PollingEventStore.Specs
                 }
             }
         }
+
+        public class When_a_cache_hitting_request_does_not_align_with_the_cached_page_size :
+            GivenSubject<PollingEventStoreAdapter>
+        {
+            private int pageSize = 1000;
+            private Transaction[] firstPage;
+            private Transaction[] secondPage;
+            private readonly ConcurrentQueue<ExpectedCall> expectedCalls = new ConcurrentQueue<ExpectedCall>(); 
+
+            public When_a_cache_hitting_request_does_not_align_with_the_cached_page_size()
+            {
+                Given(() =>
+                {
+                    var eventStore = A.Fake<IPassiveEventStore>();
+                    A.CallTo(() => eventStore.GetFrom(A<long?>.Ignored)).ReturnsLazily(call =>
+                    {
+                        if (expectedCalls.TryDequeue(out ExpectedCall expectedCall))
+                        {
+                            return new TransactionBatchBuilder().FollowingCheckpoint(expectedCall.PrecedingCheckpoint).WithPageSize(expectedCall.PageSize).Build();
+                        }
+
+                        return new Transaction[0];
+                    });
+
+                    WithSubject(_ => new PollingEventStoreAdapter(eventStore, cacheSize: pageSize * 2,
+                        pollInterval: 500.Milliseconds(), maxPageSize: pageSize, getUtcNow: () => DateTime.Now));
+                });
+
+                When(async () =>
+                {
+                    // Return an incomplete page to prevent the adapter from pre-loading the next page.
+                    expectedCalls.Enqueue(new ExpectedCall { PrecedingCheckpoint = 0, PageSize = pageSize - 1 });
+
+                    IReadOnlyList<Transaction> firstSubscribersPage = null; 
+                    
+                    // Let the first subscription load that incomplete page into the cache.
+                    ISubscription subscription = Subject.Subscribe(0, new Subscriber
+                    {
+                        HandleTransactions = (transactions, info) =>
+                        {
+                            firstSubscribersPage = transactions;
+
+                            info.Subscription.Dispose();
+
+                            return Task.FromResult(0);
+                        }
+                    }, "first");
+
+                    await subscription.Disposed;
+
+                    // Expect a request for the page following the incomplete page.
+                    expectedCalls.Enqueue(new ExpectedCall {PrecedingCheckpoint = firstSubscribersPage.Last().Checkpoint, PageSize = pageSize});
+
+                    // Let the second subscription start half-way the typical page size.
+                    subscription = Subject.Subscribe(pageSize / 2, new Subscriber
+                    {
+                        HandleTransactions = (transactions, info) =>
+                        {
+                            if (firstPage == null)
+                            {
+                                firstPage = transactions.ToArray();
+                            }
+                            else if (secondPage == null)
+                            {
+                                secondPage = transactions.ToArray();
+                                info.Subscription.Dispose();
+                            }
+
+                            return Task.FromResult(0);
+                        }
+                    }, "second");
+
+                    await subscription.Disposed;
+                });
+            }
+
+            [Fact]
+            public void Then_the_first_page_should_contain_the_cached_transactions_only()
+            {
+                firstPage.Should().HaveCount((pageSize / 2) - 1);
+            }
+
+            [Fact]
+            public void And_the_second_page_should_contain_a_full_set_again()
+            {
+                secondPage.Should().HaveCount(pageSize);
+            }
+            
+            private class ExpectedCall
+            {
+                public long PrecedingCheckpoint { get; set; }
+
+                public int PageSize { get; set; }
+            }
+        }
+        
+        public class When_a_full_page_is_loaded_and_caching_is_enabled : GivenSubject<PollingEventStoreAdapter>
+        {
+            private int pageSize = 1000;
+            private readonly TaskCompletionSource<bool> firstPageIsLoadedInCache = new TaskCompletionSource<bool>();
+            private readonly List<long> requestedCheckpoints = new List<long>();
+
+            public When_a_full_page_is_loaded_and_caching_is_enabled()
+            {
+                Given(() =>
+                {
+                    var eventStore = A.Fake<IPassiveEventStore>();
+                    A.CallTo(() => eventStore.GetFrom(A<long?>.Ignored)).ReturnsLazily(call =>
+                    {
+                        long precedingCheckpoint = call.GetArgument<long?>(0) ?? 0;
+
+                        requestedCheckpoints.Add(precedingCheckpoint);
+
+                        return Enumerable.Range((int) precedingCheckpoint + 1, pageSize)
+                            .Select(cp => new TransactionBuilder().WithCheckpoint(cp).Build()).ToArray();
+                    });
+
+                    WithSubject(_ => new PollingEventStoreAdapter(eventStore, cacheSize: pageSize * 2,
+                        pollInterval: 500.Milliseconds(), maxPageSize: pageSize, getUtcNow: () => DateTime.Now));
+
+                });
+
+                When(async () =>
+                {
+                    ISubscription subscription = Subject.Subscribe(0, new Subscriber
+                    {
+                        HandleTransactions = (_, info) =>
+                        {
+                            info.Subscription.Dispose();
+                            
+                            firstPageIsLoadedInCache.SetResult(true);
+
+                            return Task.FromResult(0);
+                        }
+                    }, "id");
+
+                    await subscription.Disposed;
+                });
+            }
+
+            [Fact]
+            public async Task Then_it_should_preload_the_next_page()
+            {
+                await firstPageIsLoadedInCache.Task;
+
+                requestedCheckpoints.Should().BeEquivalentTo(new[] {0, 1000});
+            }
+        }
+
+        public class When_a_partial_page_is_loaded_and_caching_is_enabled : GivenSubject<PollingEventStoreAdapter>
+        {
+            private int pageSize = 1000;
+            private readonly TaskCompletionSource<bool> firstPageIsLoadedInCache = new TaskCompletionSource<bool>();
+            private readonly List<long> requestedCheckpoints = new List<long>();
+
+            public When_a_partial_page_is_loaded_and_caching_is_enabled()
+            {
+                Given(() =>
+                {
+                    var eventStore = A.Fake<IPassiveEventStore>();
+                    A.CallTo(() => eventStore.GetFrom(A<long?>.Ignored)).ReturnsLazily(call =>
+                    {
+                        long precedingCheckpoint = call.GetArgument<long?>(0) ?? 0;
+
+                        requestedCheckpoints.Add(precedingCheckpoint);
+
+                        return Enumerable.Range((int) precedingCheckpoint + 1, pageSize / 2)
+                            .Select(cp => new TransactionBuilder().WithCheckpoint(cp).Build()).ToArray();
+                    });
+
+                    WithSubject(_ => new PollingEventStoreAdapter(eventStore, cacheSize: pageSize * 2,
+                        pollInterval: 500.Milliseconds(), maxPageSize: pageSize, getUtcNow: () => DateTime.Now));
+
+                });
+
+                When(async () =>
+                {
+                    var subscription = Subject.Subscribe(0, new Subscriber
+                    {
+                        HandleTransactions = (_, info) =>
+                        {
+                            info.Subscription.Dispose();
+                            
+                            firstPageIsLoadedInCache.SetResult(true);
+
+                            return Task.FromResult(0);
+                        }
+                    }, "id");
+                    
+                    await subscription.Disposed;
+                });
+            }
+
+            [Fact]
+            public async Task Then_it_should_not_preload_the_next_page()
+            {
+                await firstPageIsLoadedInCache.Task;
+
+                requestedCheckpoints.Should().BeEquivalentTo(new[] {0});
+            }
+        }
+        
+        public class When_a_full_page_is_loaded_but_caching_is_disabled : GivenSubject<PollingEventStoreAdapter>
+        {
+            private int pageSize = 1000;
+            private readonly TaskCompletionSource<bool> firstPageIsLoadedInCache = new TaskCompletionSource<bool>();
+            private readonly List<long> requestedCheckpoints = new List<long>();
+
+            public When_a_full_page_is_loaded_but_caching_is_disabled()
+            {
+                Given(() =>
+                {
+                    var eventStore = A.Fake<IPassiveEventStore>();
+                    A.CallTo(() => eventStore.GetFrom(A<long?>.Ignored)).ReturnsLazily(call =>
+                    {
+                        long precedingCheckpoint = call.GetArgument<long?>(0) ?? 0;
+
+                        requestedCheckpoints.Add(precedingCheckpoint);
+
+                        return Enumerable.Range((int) precedingCheckpoint + 1, pageSize)
+                            .Select(cp => new TransactionBuilder().WithCheckpoint(cp).Build()).ToArray();
+                    });
+
+                    WithSubject(_ => new PollingEventStoreAdapter(eventStore, cacheSize: 0,
+                        pollInterval: 500.Milliseconds(), maxPageSize: pageSize, getUtcNow: () => DateTime.Now));
+
+                });
+
+                When(async () =>
+                {
+                    var subscription = Subject.Subscribe(0, new Subscriber
+                    {
+                        HandleTransactions = (_, info) =>
+                        {
+                            info.Subscription.Dispose();
+                            
+                            firstPageIsLoadedInCache.SetResult(true);
+
+                            return Task.FromResult(0);
+                        }
+                    }, "id");
+
+                    await subscription.Disposed;
+                });
+            }
+
+            [Fact]
+            public async Task Then_it_should_not_preload_the_next_page()
+            {
+                await firstPageIsLoadedInCache.Task;
+
+                requestedCheckpoints.Should().BeEquivalentTo(new[] {0});
+            }
+        }
+
     }
 }

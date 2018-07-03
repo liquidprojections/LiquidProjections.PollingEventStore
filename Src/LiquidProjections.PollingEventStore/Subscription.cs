@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -6,7 +7,7 @@ using LiquidProjections.Abstractions;
 
 namespace LiquidProjections.PollingEventStore
 {
-    internal sealed class Subscription : IDisposable
+    internal sealed class Subscription : ISubscription
     {
         private readonly PollingEventStoreAdapter eventStoreAdapter;
         private CancellationTokenSource cancellationTokenSource;
@@ -16,6 +17,8 @@ namespace LiquidProjections.PollingEventStore
         private readonly Subscriber subscriber;
         private readonly TimeSpan pollInterval;
         private readonly LogMessage logger;
+        private Task task;
+        private readonly string id;
 
         public Subscription(PollingEventStoreAdapter eventStoreAdapter, long lastProcessedCheckpoint,
             Subscriber subscriber, string subscriptionId, TimeSpan pollInterval, LogMessage logger)
@@ -24,17 +27,20 @@ namespace LiquidProjections.PollingEventStore
             this.lastProcessedCheckpoint = lastProcessedCheckpoint;
             this.subscriber = subscriber;
             this.pollInterval = pollInterval;
-            this.logger = logger;
-            Id = subscriptionId;
+            id = subscriptionId;
+
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
+            this.logger = logger ?? (_ =>
+            {
+            });
+#else
+            this.logger= _ => {};
+#endif
         }
-
-        public Task Task { get; private set; }
-
-        public string Id { get; }
 
         public void Start()
         {
-            if (Task != null)
+            if (task != null)
             {
                 throw new InvalidOperationException("Already started.");
             }
@@ -48,20 +54,20 @@ namespace LiquidProjections.PollingEventStore
 
                 cancellationTokenSource = new CancellationTokenSource();
 #if LIQUIDPROJECTIONS_DIAGNOSTICS
-                logger(() => $"Subscription {Id} has been started.");
+                logger(() => $"Subscription {id} has been started.");
 #endif
 
-                var info = new SubscriptionInfo
-                {
-                    Id = Id,
-                    Subscription = this,
-                    CancellationToken = cancellationTokenSource.Token
-                };
-
-                Task = Task.Run(async () =>
+                task = Task.Run(async () =>
                     {
                         try
                         {
+                            var info = new SubscriptionInfo
+                            {
+                                Id = id,
+                                Subscription = this,
+                                CancellationToken = cancellationTokenSource.Token
+                            };
+
                             await RunAsync(info).ConfigureAwait(false);
                         }
                         catch (OperationCanceledException)
@@ -71,11 +77,11 @@ namespace LiquidProjections.PollingEventStore
                         catch (Exception exception)
                         {
                             logger(() =>
-                                "NEventStore polling task has failed. Event subscription has been cancelled: " +
+                                "Polling task has failed. Event subscription has been cancelled: " +
                                 exception);
                         }
                     },
-                    CancellationToken.None);
+                    cancellationTokenSource.Token);
             }
         }
 
@@ -91,7 +97,7 @@ namespace LiquidProjections.PollingEventStore
                 Page page = await TryGetNextPage(lastProcessedCheckpoint).ConfigureAwait(false);
                 if (page != null)
                 {
-                    var transactions = page.Transactions;
+                    IReadOnlyList<Transaction> transactions = page.Transactions;
 
                     if (firstRequestAfterSubscribing)
                     {
@@ -111,11 +117,11 @@ namespace LiquidProjections.PollingEventStore
 
                     if (transactions.Count > 0)
                     {
-                        await subscriber.HandleTransactions(transactions, info).ConfigureAwait(false);
+                        await Task.Run(() => subscriber.HandleTransactions(transactions, info)).ConfigureAwait(false);
 
 #if LIQUIDPROJECTIONS_DIAGNOSTICS
                         logger(() =>
-                            $"Subscription {Id} has processed a page of size {page.Transactions.Count} " +
+                            $"Subscription {id} has processed a page of size {page.Transactions.Count} " +
                             $"from checkpoint {page.Transactions.First().Checkpoint} " +
                             $"to checkpoint {page.Transactions.Last().Checkpoint}.");
 #endif
@@ -126,6 +132,10 @@ namespace LiquidProjections.PollingEventStore
                     {
                         await Task.Delay(pollInterval);
                     }
+                }
+                else
+                {
+                    await Task.Delay(pollInterval);
                 }
             }
         }
@@ -138,18 +148,17 @@ namespace LiquidProjections.PollingEventStore
             {
 #if LIQUIDPROJECTIONS_DIAGNOSTICS
                 logger(() =>
-                    $"Subscription {Id} is requesting a page after checkpoint {checkpoint}.");
+                    $"Request Page (subscription: {id}, precedingCheckpoint: {checkpoint}).");
 #endif
 
-                page = await eventStoreAdapter.GetNextPage(checkpoint, Id)
+                page = await eventStoreAdapter.GetNextPage(checkpoint, id, cancellationTokenSource.Token)
                     .WithWaitCancellation(cancellationTokenSource.Token)
                     .ConfigureAwait(false);
 
 #if LIQUIDPROJECTIONS_DIAGNOSTICS
                 logger(() =>
-                    $"Subscription {Id} has got a page of size {page.Transactions.Count} " +
-                    $"from checkpoint {page.Transactions.First().Checkpoint} " +
-                    $"to checkpoint {page.Transactions.Last().Checkpoint}.");
+                    $"Received Page (subscription: {id}, size: {page.Transactions.Count}, " +
+                    $"range: {page.Transactions.First().Checkpoint}-{page.Transactions.Last().Checkpoint}.");
 #endif
             }
             catch
@@ -160,12 +169,13 @@ namespace LiquidProjections.PollingEventStore
             return page;
         }
 
-        public void Complete()
+        public void Dispose()
         {
-            Dispose();
+            Complete();
+            eventStoreAdapter.Unsubscribe(this);
         }
 
-        public void Dispose()
+        public void Complete()
         {
             lock (syncRoot)
             {
@@ -174,7 +184,7 @@ namespace LiquidProjections.PollingEventStore
                     isDisposed = true;
 
 #if LIQUIDPROJECTIONS_DIAGNOSTICS
-                    logger(() => $"Subscription {Id} is being stopped.");
+                    logger(() => $"Subscription {id} is being stopped.");
 #endif
 
                     if (cancellationTokenSource != null)
@@ -189,19 +199,14 @@ namespace LiquidProjections.PollingEventStore
                         }
                     }
 
-                    lock (eventStoreAdapter.SubscriptionLock)
-                    {
-                        eventStoreAdapter.Subscriptions.Remove(this);
-                    }
-
-                    if (Task == null)
+                    if (task == null)
                     {
                         FinishDisposing();
                     }
                     else
                     {
                         // Wait for the task asynchronously.
-                        Task.ContinueWith(_ => FinishDisposing());
+                        task.ContinueWith(_ => FinishDisposing());
                     }
                 }
             }
@@ -209,11 +214,16 @@ namespace LiquidProjections.PollingEventStore
 
         private void FinishDisposing()
         {
-            cancellationTokenSource?.Dispose();
+                    cancellationTokenSource?.Dispose();
 
 #if LIQUIDPROJECTIONS_DIAGNOSTICS
-            logger(() => $"Subscription {Id} has been stopped.");
+            logger(() => $"Subscription {id} has been stopped.");
 #endif
+                }
+
+        public Task Disposed
+        {
+            get { return task; }
         }
     }
 }

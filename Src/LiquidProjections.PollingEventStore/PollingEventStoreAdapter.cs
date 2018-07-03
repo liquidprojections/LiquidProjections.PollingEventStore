@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -25,12 +26,19 @@ namespace LiquidProjections.PollingEventStore
     {
         private readonly TimeSpan pollInterval;
         private readonly int maxPageSize;
-        private readonly LogMessage logger;
+        private readonly LogMessage logDebug;
+        private readonly LogMessage logError;
         private readonly IPassiveEventStore eventStore;
-        internal readonly HashSet<Subscription> Subscriptions = new HashSet<Subscription>();
-        private volatile bool isDisposed;
-        internal readonly object SubscriptionLock = new object();
-        private Task<Page> currentPreloader;
+        private readonly HashSet<Subscription> subscriptions = new HashSet<Subscription>();
+        private readonly object subscriptionLock = new object();
+        private Task loader;
+
+        private TaskCompletionSource<bool> requestQueued = new TaskCompletionSource<bool>();
+
+        private readonly ConcurrentQueue<LoadRequest> pendingRequests =
+            new ConcurrentQueue<LoadRequest>();
+
+        private readonly CancellationTokenSource disposingCancellationTokenSource = new CancellationTokenSource();
 
         /// <summary>
         /// Stores cached transactions by the checkpoint of their PRECEDING transaction. This ensures that
@@ -59,12 +67,29 @@ namespace LiquidProjections.PollingEventStore
         /// <param name="getUtcNow">
         /// Obsolete. Only kept in there to prevent breaking changes.
         /// </param>
-        public PollingEventStoreAdapter(IPassiveEventStore eventStore, int cacheSize, TimeSpan pollInterval, int maxPageSize, Func<DateTime> getUtcNow, LogMessage logger = null)
+        /// <param name="logger">
+        /// An optional method for logging internal diagnostic messages as well as any exceptions that happen.
+        /// </param>
+        /// <remarks>
+        /// Diagnostic information is only logged if this code is compiled with the LIQUIDPROJECTIONS_DIAGNOSTICS compiler symbol.
+        /// </remarks>
+        public PollingEventStoreAdapter(IPassiveEventStore eventStore, int cacheSize, TimeSpan pollInterval, int maxPageSize,
+            Func<DateTime> getUtcNow, LogMessage logger = null)
         {
             this.eventStore = eventStore;
             this.pollInterval = pollInterval;
             this.maxPageSize = maxPageSize;
-            this.logger = logger ?? (_ => {});
+
+#if LIQUIDPROJECTIONS_DIAGNOSTICS
+            this.logDebug = logger ?? (_ =>
+            {
+            });
+#else
+            this.logDebug = _ => {};
+#endif
+            this.logError = logger ?? (_ =>
+            {
+            });
 
             if (cacheSize > 0)
             {
@@ -72,7 +97,7 @@ namespace LiquidProjections.PollingEventStore
             }
         }
 
-        public IDisposable Subscribe(long? lastProcessedCheckpoint, Subscriber subscriber, string subscriptionId)
+        public ISubscription Subscribe(long? lastProcessedCheckpoint, Subscriber subscriber, string subscriptionId)
         {
             if (subscriber == null)
             {
@@ -81,50 +106,82 @@ namespace LiquidProjections.PollingEventStore
 
             Subscription subscription;
 
-            lock (SubscriptionLock)
+            lock (subscriptionLock)
             {
-                if (isDisposed)
+                if (disposingCancellationTokenSource.IsCancellationRequested)
                 {
                     throw new ObjectDisposedException(typeof(PollingEventStoreAdapter).FullName);
                 }
 
-                subscription = new Subscription(this, lastProcessedCheckpoint ?? 0, subscriber, subscriptionId, pollInterval, logger);
-                Subscriptions.Add(subscription);
+                if (loader == null)
+                {
+                    logDebug(() => $"Queue Processing Started (subscription: {subscriptionId})");
+
+                    ProcessPendingRequestsAsync();
+                }
+
+                subscription = new Subscription(this, lastProcessedCheckpoint ?? 0, subscriber, subscriptionId ?? "No Id",
+                    pollInterval, logDebug);
+                subscriptions.Add(subscription);
             }
 
             subscription.Start();
             return subscription;
         }
 
-        internal async Task<Page> GetNextPage(long lastProcessedCheckpoint, string subscriptionId)
+        internal void Unsubscribe(Subscription subscription)
         {
-            if (isDisposed)
+            lock (subscriptionLock)
             {
-                throw new ObjectDisposedException(typeof(PollingEventStoreAdapter).FullName);
+                subscriptions.Remove(subscription);
             }
+        }
 
-            Page pageFromCache = TryGetNextPageFromCache(lastProcessedCheckpoint, subscriptionId);
-            if (pageFromCache.Transactions.Count > 0)
+        internal async Task<Page> GetNextPage(long precedingCheckpoint, string subscriptionId,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            
+            Page pageFromCache = TryGetNextPageFromCache(precedingCheckpoint, subscriptionId, cancellationToken);
+            if (!pageFromCache.IsEmpty)
             {
                 return pageFromCache;
             }
 
+            LoadRequest pendingRequest =
+                pendingRequests.ToArray().SingleOrDefault(x => x.PrecedingCheckpoint == precedingCheckpoint);
 
-            Page loadedPage = await LoadNextPage(lastProcessedCheckpoint, subscriptionId).ConfigureAwait(false);
- 
-            if (loadedPage.Transactions.Count == maxPageSize)
+            if (pendingRequest != null)
             {
-                StartPreloadingNextPage(loadedPage.LastCheckpoint, subscriptionId);
+                logDebug(() =>
+                    $"Pending Request Found (subscription: {subscriptionId}, originalSubscription: " +
+                    $"{pendingRequest.SubscriptionId}, preceding checkpoint: {precedingCheckpoint}");
+
+                return await pendingRequest.Page;
             }
 
-            return loadedPage;
+            Page completedPage = await RequestPageLoad(subscriptionId, precedingCheckpoint, cancellationToken);
+            if ((completedPage != null) && ShouldPreloadNextPage(completedPage))
+            {
+                // Ignore the result. It will become available through the queue.
+                Task _ = RequestPageLoad(subscriptionId, completedPage.LastCheckpoint, cancellationToken);
+            }
+
+            return completedPage;
         }
 
-        private Page TryGetNextPageFromCache(long precedingCheckpoint, string subscriptionId)
+        private bool ShouldPreloadNextPage(Page completedPage)
         {
-            if ((cachedTransactionsByPrecedingCheckpoint != null) && cachedTransactionsByPrecedingCheckpoint.TryGet(precedingCheckpoint, out Transaction cachedTransaction))
+            // NOTE: Only preload when caching is enabled. If it is not, other subscribers will only benefit from preloading if the request for a particular
+            // page is still in the queue.
+            return IsCachingEnabled && (completedPage.Transactions.Count == maxPageSize);
+        }
+
+        private Page TryGetNextPageFromCache(long precedingCheckpoint, string subscriptionId, CancellationToken cancellationToken)
+        {
+            if (IsCachingEnabled && cachedTransactionsByPrecedingCheckpoint.TryGet(precedingCheckpoint, out Transaction cachedTransaction))
             {
-                var resultPage = new List<Transaction>(maxPageSize) { cachedTransaction };
+                var resultPage = new List<Transaction>(maxPageSize) {cachedTransaction};
 
                 while (resultPage.Count < maxPageSize)
                 {
@@ -136,271 +193,214 @@ namespace LiquidProjections.PollingEventStore
                     }
                     else
                     {
-                        StartPreloadingNextPage(lastCheckpoint, subscriptionId);
+                        Task _ = RequestPageLoad(subscriptionId, lastCheckpoint, cancellationToken);
                         break;
                     }
                 }
 
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
-                logger(() =>
-                    $"Subscription {subscriptionId} has found a page of size {resultPage.Count} " +
-                    $"from checkpoint {resultPage.First().Checkpoint} " +
-                    $"to checkpoint {resultPage.Last().Checkpoint} in the cache.");
-#endif
+                logDebug(() =>
+                    $"Cache Hit: (subscription: {subscriptionId}, precedingCheckpoint: {precedingCheckpoint}, page size: {resultPage.Count}, range: {resultPage.First().Checkpoint}-{resultPage.Last().Checkpoint})");
 
                 return new Page(precedingCheckpoint, resultPage);
             }
 
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
-            logger(() =>
-                $"Subscription {subscriptionId} has not found the next transaction in the cache.");
-#endif
+            logDebug(() =>
+                $"Cache Miss: (subscription: {subscriptionId}, precedingCheckpoint: {precedingCheckpoint}).");
 
             return new Page(precedingCheckpoint, new Transaction[0]);
         }
 
-        private void StartPreloadingNextPage(long precedingCheckpoint, string subscriptionId)
+        private Task<Page> RequestPageLoad(string subscriptionId, long precedingCheckpoint, CancellationToken cancellationToken)
         {
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
-            logger(() =>
-                $"Subscription {subscriptionId} has started preloading transactions " +
-                $"after checkpoint {precedingCheckpoint}.");
-#endif
+            var loadRequest = new LoadRequest
+            {
+                SubscriptionId = subscriptionId,
+                PrecedingCheckpoint = precedingCheckpoint,
+                CancellationToken = cancellationToken
+            };
+            
+            pendingRequests.Enqueue(loadRequest);
+            requestQueued.TrySetResult(true);
 
-            // Ignore result.
-            Task _ = LoadNextPage(precedingCheckpoint, subscriptionId);
+            return loadRequest.Page;
         }
 
-        private async Task<Page> LoadNextPage(long precedingCheckpoint, string subscriptionId)
+        private void ProcessPendingRequestsAsync()
         {
-            while (true)
-            {
-                if (isDisposed)
-                {
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
-                    logger(() =>
-                        $"Page loading for subscription {subscriptionId} cancelled because the adapter is disposed.");
-#endif
-
-                    throw new OperationCanceledException();
-                }
-
-                Page candidatePage = await TryLoadNextOrWaitForPreLoadingToFinish(precedingCheckpoint, subscriptionId)
-                    .ConfigureAwait(false);
-
-                if (candidatePage.PrecedingCheckpoint == precedingCheckpoint)
-                {
-                    return candidatePage;
-                }
-            }
-        }
-
-        private Task<Page> TryLoadNextOrWaitForPreLoadingToFinish(long precedingCheckpoint, string subscriptionId)
-        {
-            if (isDisposed)
-            {
-                return Task.FromResult(new Page(precedingCheckpoint, new Transaction[0]));
-            }
-
-            TaskCompletionSource<Page> ourPreloader = null;
-            bool isOurPreloader = false;
-            Task<Page> loader = Volatile.Read(ref currentPreloader);
-
-            try
-            {
-                if (loader == null)
-                {
-                    ourPreloader = new TaskCompletionSource<Page>();
-                    Task<Page> oldLoader = Interlocked.CompareExchange(ref currentPreloader, ourPreloader.Task, null);
-                    isOurPreloader = (oldLoader == null);
-                    loader = isOurPreloader ? ourPreloader.Task : oldLoader;
-                }
-
-                return loader;
-            }
-            finally
-            {
-                if (isOurPreloader)
-                {
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
-                    logger(() => $"Subscription {subscriptionId} created a loader {loader.Id} " +
-                                     $"for a page after checkpoint {precedingCheckpoint}.");
-#endif
-
-                    if (isDisposed)
-                    {
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
-                        logger(() => $"The loader {loader.Id} is cancelled because the adapter is disposed.");
-#endif
-                        
-                        // If the adapter is disposed before the current task is set, we cancel the task
-                        // so we do not touch the event store. 
-                        ourPreloader.SetCanceled();
-                    }
-                    else
-                    {
-                        // Ignore result.
-                        Task _ = TryLoadNextPageAndMakeLoaderComplete(precedingCheckpoint, ourPreloader, subscriptionId);
-                    }
-                }
-                else
-                {
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
-                    logger(() => $"Subscription {subscriptionId} is waiting for loader {loader.Id}.");
-#endif
-                }
-            }
-        }
-
-        private async Task TryLoadNextPageAndMakeLoaderComplete(long precedingCheckpoint,
-            TaskCompletionSource<Page> loaderCompletionSource, string subscriptionId)
-        {
-            Page nextPage;
-
-            try
+            loader = Task.Run(async () =>
             {
                 try
                 {
-                    nextPage = await LoadAndCachePage(precedingCheckpoint, subscriptionId).ConfigureAwait(false);
+                    while (!disposingCancellationTokenSource.IsCancellationRequested)
+                    {
+                        await WaitForPendingRequest();
+
+                        // Keep the request on the queue, so the subscriber can wait the result of preloading the next page.
+                        if (pendingRequests.TryPeek(out LoadRequest request))
+                        {
+                            try
+                            {
+                                Page page = await LoadPage(request.PrecedingCheckpoint, request.SubscriptionId, request.CancellationToken);
+                                if (!page.IsEmpty)
+                                {
+                                    CachePage(page, request.SubscriptionId);
+                                }
+
+                                request.SetResult(page);
+                            }
+                            catch
+                            {
+                                // Ignore the exception and have the subscriber try again if it wants to.
+                                request.SetResult(null);
+                            }
+                            finally
+                            {
+                                // By now, the result is available in the cache, so subscribers that were too late to await
+                                // the preload can benefit from it as well.
+                                pendingRequests.TryDequeue(out LoadRequest _);
+                            }
+                        }
+                    }
                 }
-                finally
+                catch (OperationCanceledException)
                 {
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
-                    logger(() =>
-                        $"Loader for subscription {subscriptionId} is no longer the current one.");
-#endif
-                    Volatile.Write(ref currentPreloader, null);
+                    // The cancellation token was triggered, so let this path die off silently.                  
                 }
-            }
-            catch (Exception exception)
-            {
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
-                logger(() => $"Loader for subscription {subscriptionId} has failed: " + exception);
-#endif
-
-                loaderCompletionSource.SetException(exception);
-                return;
-            }
-
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
-            logger(() =>
-                $"Loader for subscription {subscriptionId} has completed.");
-#endif
-            loaderCompletionSource.SetResult(nextPage);
+            }, disposingCancellationTokenSource.Token);
         }
 
-        private async Task<Page> LoadAndCachePage(long precedingCheckpoint, string subscriptionId)
+        private async Task WaitForPendingRequest()
         {
-            // Maybe it's just loaded to cache.
-            try
+            if (pendingRequests.IsEmpty)
             {
-                Page cachedPage = TryGetNextPageFromCache(precedingCheckpoint, subscriptionId);
-                if (cachedPage.Transactions.Count > 0)
+                await requestQueued.Task.WithWaitCancellation(disposingCancellationTokenSource.Token);
+                if (pendingRequests.IsEmpty)
                 {
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
-                    logger(() => $"Loader for subscription {subscriptionId} has found a page in the cache.");
-#endif
-                    return cachedPage;
+                    requestQueued = new TaskCompletionSource<bool>();
+
+                    await requestQueued.Task.WithWaitCancellation(disposingCancellationTokenSource.Token);
                 }
             }
-            catch (Exception exception)
-            {
-                logger(() => 
-                        $"Failed getting transactions after checkpoint {precedingCheckpoint} from the cache: " + exception);
-            }
+        }
 
+        private async Task<Page> LoadPage(long precedingCheckpoint, string subscriptionId, CancellationToken cancellationToken)
+        {
             List<Transaction> transactions;
 
             try
             {
                 transactions = await Task
                     .Run(() => eventStore
-                        .GetFrom((precedingCheckpoint == 0) ? (long?)null : precedingCheckpoint)
+                        .GetFrom((precedingCheckpoint == 0) ? (long?) null : precedingCheckpoint)
                         .Take(maxPageSize)
-                        .ToList())
+                        .ToList(), cancellationToken)
                     .ConfigureAwait(false);
             }
-            catch (Exception exception)
+            catch (Exception exception) when (!(exception is TaskCanceledException))
             {
-                logger(() => $"Failed loading transactions after checkpoint {precedingCheckpoint} from NEventStore: " +
-                        exception);
+                logError(() => $"Failed loading transactions preceding checkpoint {precedingCheckpoint} from event store: " +
+                               exception);
 
                 throw;
             }
-            
+
             if (transactions.Count > 0)
             {
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
-                logger(() =>
-                    $"Loader for subscription {subscriptionId ?? "without ID"} has loaded {transactions.Count} transactions " +
-                    $"from checkpoint {transactions.First().Checkpoint} to checkpoint {transactions.Last().Checkpoint}.");
-#endif
+                logDebug(() =>
+                    $"Loaded from Event Store: (subscription: {subscriptionId}, precedingCheckpoint: {precedingCheckpoint}, transactions: {transactions.Count}, range: {transactions.First().Checkpoint}-{transactions.Last().Checkpoint}.");
 
                 if (transactions.First().Checkpoint <= precedingCheckpoint)
                 {
                     throw new InvalidOperationException(
                         $"The event store returned a transaction with checkpoint {transactions.First().Checkpoint} that is supposed to be higher than the requested {precedingCheckpoint}");
                 }
-
-                if (cachedTransactionsByPrecedingCheckpoint != null)
-                {
-                    /* Add to cache in reverse order to prevent other projectors
-                        from requesting already loaded transactions which are not added to cache yet. */
-                    for (int index = transactions.Count - 1; index > 0; index--)
-                    {
-                        cachedTransactionsByPrecedingCheckpoint.Set(transactions[index - 1].Checkpoint, transactions[index]);
-                    }
-
-                    cachedTransactionsByPrecedingCheckpoint.Set(precedingCheckpoint, transactions[0]);
-
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
-                    logger(() =>
-                        $"Loader for subscription {subscriptionId ?? "without ID"} has cached {transactions.Count} transactions " +
-                        $"from checkpoint {transactions.First().Checkpoint} to checkpoint {transactions.Last().Checkpoint}.");
-#endif
-                }
             }
             else
             {
-#if LIQUIDPROJECTIONS_DIAGNOSTICS
-                logger(() =>
-                    $"Loader for subscription {subscriptionId} has discovered " +
-                    $"that there are no new transactions yet. Next request for the new transactions will be delayed.");
-#endif
+                logDebug(() =>
+                    $"No Transactions: (subscriptionId: {subscriptionId}, precedingCheckpoint: {precedingCheckpoint})");
             }
 
             return new Page(precedingCheckpoint, transactions);
         }
 
+        private void CachePage(Page page, string subscriptionId)
+        {
+            if (IsCachingEnabled)
+            {
+                IReadOnlyList<Transaction> transactions = page.Transactions;
+
+                // Add to cache in reverse order to prevent other projectors seeing the first transactions on the cache before the entire page is there. 
+                for (int index = transactions.Count - 1; index > 0; index--)
+                {
+                    cachedTransactionsByPrecedingCheckpoint.Set(transactions[index - 1].Checkpoint, transactions[index]);
+                }
+
+                cachedTransactionsByPrecedingCheckpoint.Set(page.PrecedingCheckpoint, transactions[0]);
+
+                logDebug(() =>
+                    $"Cached: (subscription: {subscriptionId}, precedingCheckpoint: {page.PrecedingCheckpoint}, transactions: {transactions.Count}, range: {transactions.First().Checkpoint}-{transactions.Last().Checkpoint}.");
+            }
+        }
+
+        private bool IsCachingEnabled
+        {
+            get { return (cachedTransactionsByPrecedingCheckpoint != null); }
+        }
+
         public void Dispose()
         {
-            lock (SubscriptionLock)
+            lock (subscriptionLock)
             {
-                if (!isDisposed)
+                if (!disposingCancellationTokenSource.IsCancellationRequested)
                 {
-                    isDisposed = true;
+                    disposingCancellationTokenSource.Cancel();
 
-                    foreach (Subscription subscription in Subscriptions.ToArray())
+                    foreach (Subscription subscription in subscriptions)
                     {
                         subscription.Complete();
                     }
 
                     // New loading tasks are no longer started at this point.
                     // After the current loading task is finished, the event store is no longer used and can be disposed.
-                    Task loaderToWaitFor = Volatile.Read(ref currentPreloader);
+                    Task taskToWaitFor = Volatile.Read(ref loader);
 
                     try
                     {
-                        loaderToWaitFor?.Wait();
+                        taskToWaitFor?.Wait();
                     }
                     catch (AggregateException)
                     {
                         // Ignore.
                     }
 
+                    // ReSharper disable once SuspiciousTypeConversion.Global
                     (eventStore as IDisposable)?.Dispose();
                 }
             }
+        }
+    }
+
+    internal class LoadRequest
+    {
+        private readonly TaskCompletionSource<Page> completionSource;
+
+        public LoadRequest()
+        {
+            completionSource = new TaskCompletionSource<Page>();
+        }
+
+        public string SubscriptionId { get; set; }
+
+        public Task<Page> Page => completionSource.Task;
+
+        public long PrecedingCheckpoint { get; set; }
+
+        public CancellationToken CancellationToken { get; set; }
+
+        public void SetResult(Page page)
+        {
+            completionSource.SetResult(page);
         }
     }
 
@@ -412,7 +412,7 @@ namespace LiquidProjections.PollingEventStore
     public
 #else
     internal 
-#endif 
+#endif
         interface IPassiveEventStore
     {
         /// <summary>

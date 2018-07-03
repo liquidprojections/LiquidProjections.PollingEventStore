@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using FluentAssertions;
+using FluentAssertions.Extensions;
 
 namespace LiquidProjections.PollingEventStore.Specs
 {
