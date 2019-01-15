@@ -12,18 +12,17 @@ namespace LiquidProjections.PollingEventStore
         private CancellationTokenSource cancellationTokenSource;
         private readonly object syncRoot = new object();
         private bool isDisposed;
-        private long lastProcessedCheckpoint;
         private readonly Subscriber subscriber;
         private readonly TimeSpan pollInterval;
         private readonly LogMessage logger;
         private Task task;
         private readonly string id;
+        private ProgressTracker tracker;
 
         public Subscription(PollingEventStoreAdapter eventStoreAdapter, long lastProcessedCheckpoint,
             Subscriber subscriber, string subscriptionId, TimeSpan pollInterval, LogMessage logger)
         {
             this.eventStoreAdapter = eventStoreAdapter;
-            this.lastProcessedCheckpoint = lastProcessedCheckpoint;
             this.subscriber = subscriber;
             this.pollInterval = pollInterval;
             id = subscriptionId;
@@ -35,6 +34,8 @@ namespace LiquidProjections.PollingEventStore
 #else
             this.logger = _ => {};
 #endif
+
+            tracker = new ProgressTracker(lastProcessedCheckpoint, logger);
         }
 
         public void Start()
@@ -82,9 +83,33 @@ namespace LiquidProjections.PollingEventStore
             }
         }
 
+        public Task<bool> CatchUpUntil(long checkpoint, 
+            TimeSpan timeout = default(TimeSpan), CancellationToken cancellationToken = default(CancellationToken))
+        {
+            if (isDisposed)
+            {
+                throw new ObjectDisposedException($"Subscription with id {id} is already disposed");
+            }
+
+            return tracker.CatchUpUntil(checkpoint, timeout, cancellationToken);
+        }
+        
+        public Task<bool> CatchUp(
+            TimeSpan timeout = default(TimeSpan), CancellationToken cancellationToken = default(CancellationToken))
+        {
+            if (isDisposed)
+            {
+                throw new ObjectDisposedException($"Subscription with id {id} is already disposed");
+            }
+            
+            return tracker.CatchUp(timeout, cancellationToken);
+        }
+
         private async Task RunAsync(SubscriptionInfo info)
         {
-            Page page = await HandleFirstRequestToDetectAheadSubscribers(lastProcessedCheckpoint, info);
+            Page page = (tracker.LastProcessedCheckpoint > 0)
+                ? await HandleFirstRequestToDetectAheadSubscribers(tracker.LastProcessedCheckpoint, info)
+                : await TryGetNextPage(tracker.LastProcessedCheckpoint);
 
             while (!cancellationTokenSource.IsCancellationRequested)
             {
@@ -92,14 +117,16 @@ namespace LiquidProjections.PollingEventStore
                 {
                     await PublishToSubscriber(info, page);
 
-                    lastProcessedCheckpoint = page.LastCheckpoint;
+                    tracker.TrackProgress(page.LastCheckpoint);
                 }
                 else
                 {
+                    tracker.TrackCatchUp();
+
                     await Task.Delay(pollInterval);
                 }
 
-                page = await TryGetNextPage(lastProcessedCheckpoint);
+                page = await TryGetNextPage(tracker.LastProcessedCheckpoint);
             }
         }
 
@@ -111,13 +138,14 @@ namespace LiquidProjections.PollingEventStore
             precedingCheckpoint = precedingCheckpoint > 0 ? precedingCheckpoint - offsetToDetectAheadSubscriber : 0;
 
             Transaction[] transactions = null;
-            
+
             Page page = await TryGetNextPage(precedingCheckpoint).ConfigureAwait(false);
             if (page != null)
             {
                 transactions = page.Transactions.ToArray();
                 if (!transactions.Any())
                 {
+                    // SMELL: This will also get raised when you start at checkpoint 0
                     await subscriber.NoSuchCheckpoint(info).ConfigureAwait(false);
                 }
                 else
@@ -160,8 +188,9 @@ namespace LiquidProjections.PollingEventStore
                     $"Received Page (subscription: {id}, size: {page.Transactions.Count}, " +
                     $"range: {page.Transactions.First().Checkpoint}-{page.Transactions.Last().Checkpoint}.");
             }
-            catch
+            catch (Exception ex) when (!(ex is TaskCanceledException))
             {
+                logger(() => $"Caught exception while trying to get next page: {ex}");
                 // Just continue the next iteration after a small pause
             }
 
